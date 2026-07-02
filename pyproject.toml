@@ -1,0 +1,46 @@
+[project]
+name = "kdk2h"
+version = "0.1.0"
+description = "Print DWARF types found in declarations"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["dwarf", "macho", "elf", "debug", "kdk"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Software Development :: Build Tools",
+]
+dependencies = [
+    "pyelftools>=0.31",
+    "macholib>=1.16.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2.1",
+    "twine>=5.1.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/<your-user>/kdk2h"
+Repository = "https://github.com/<your-user>/kdk2h"
+Issues = "https://github.com/<your-user>/kdk2h/issues"
+
+[project.scripts]
+kdk2h = "kdk2h.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["kdk2h"]
