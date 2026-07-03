@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -29,6 +28,15 @@ COMPOSITE_TYPE_TAGS = {
 
 TRAVERSABLE_TYPE_TAGS = TYPE_TAGS - {"DW_TAG_base_type"}
 GRAPH_TYPE_TAGS = TYPE_TAGS
+
+VENDOR_TAG_NAMES: dict[int, str] = {
+    0x4300: "DW_TAG_APPLE_ptrauth_type",
+}
+
+DW_TAG_APPLE_PTRAUTH_TYPE = 0x4300
+DW_AT_APPLE_PTRAUTH_KEY = 0x3E04
+DW_AT_APPLE_PTRAUTH_ADDR_DISCRIMINATED = 0x3E05
+DW_AT_APPLE_PTRAUTH_EXTRA_DISCRIMINATOR = 0x3E06
 
 
 def decode_name(raw_name: object) -> str:
@@ -63,9 +71,55 @@ def _die_key(cu_prefix: str, die: Any) -> str:
     return f"{cu_prefix}{die.cu.cu_offset:#x}:{die.offset:#x}"
 
 
+def _tag_name(tag: object) -> str:
+    if isinstance(tag, str):
+        return tag
+    if isinstance(tag, int):
+        known = VENDOR_TAG_NAMES.get(tag)
+        if known is not None:
+            return known
+        return f"DW_TAG_0x{tag:x}"
+    return str(tag)
+
+
+def _attr_value(die: Any, attr_name: str, attr_code: int) -> Any | None:
+    attr = die.attributes.get(attr_name)
+    if attr is None:
+        attr = die.attributes.get(attr_code)
+    if attr is None:
+        return None
+    return getattr(attr, "value", None)
+
+
+def _ptrauth_annotation(die: Any) -> str | None:
+    if die.tag != DW_TAG_APPLE_PTRAUTH_TYPE:
+        return None
+
+    key = _attr_value(die, "DW_AT_APPLE_ptrauth_key", DW_AT_APPLE_PTRAUTH_KEY)
+    addr_disc = _attr_value(
+        die,
+        "DW_AT_APPLE_ptrauth_address_discriminated",
+        DW_AT_APPLE_PTRAUTH_ADDR_DISCRIMINATED,
+    )
+    extra_disc = _attr_value(
+        die,
+        "DW_AT_APPLE_ptrauth_extra_discriminator",
+        DW_AT_APPLE_PTRAUTH_EXTRA_DISCRIMINATOR,
+    )
+
+    if not isinstance(key, int):
+        return None
+
+    addr_disc_bit = 1 if bool(addr_disc) else 0
+    if not isinstance(extra_disc, int):
+        extra_disc = 0
+
+    return f"/* __ptrauth(0x{key:02x}, {addr_disc_bit}, 0x{extra_disc:x}) */"
+
+
 def _format_die(cu_prefix: str, die: Any) -> str:
     name = die_name(die)
-    return f"{die.tag} {name} [{_die_key(cu_prefix, die)}]"
+    return f"{_tag_name(die.tag)} {name} [{_die_key(cu_prefix, die)}]"
 
 
 def _resolve_type_attr(die: Any) -> Any | None:
@@ -75,6 +129,12 @@ def _resolve_type_attr(die: Any) -> Any | None:
         return die.get_DIE_from_attribute("DW_AT_type")
     except Exception:
         return None
+
+
+def _is_traversable_type(die: Any) -> bool:
+    if die.tag in TRAVERSABLE_TYPE_TAGS:
+        return True
+    return _resolve_type_attr(die) is not None
 
 
 def _c_tag_name(tag: str) -> str:
@@ -126,6 +186,12 @@ def _c_type_ref(cu_prefix: str, die: Any) -> str:
         return _c_type_ref(cu_prefix, target)
     if die.tag == "DW_TAG_subroutine_type":
         return "void (*)(void)"
+
+    # Handle vendor/extension wrappers that carry an underlying DW_AT_type.
+    target = _resolve_type_attr(die)
+    if target is not None and target is not die:
+        return _c_type_ref(cu_prefix, target)
+
     return "void"
 
 
@@ -300,17 +366,33 @@ def _unwrap_array_type(type_die: Any) -> tuple[Any, list[str]]:
 
 def _c_typed_name(cu_prefix: str, type_die: Any, name: str) -> str:
     base_type_die, dimensions = _unwrap_array_type(type_die)
+    type_annotation = ""
     if base_type_die is None:
         base_type = "void"
     else:
-        base_type = _c_type_ref(cu_prefix, base_type_die)
+        annotation = _ptrauth_annotation(base_type_die)
+        target_for_ref = _resolve_type_attr(base_type_die) if annotation is not None else base_type_die
+        if target_for_ref is None:
+            base_type = "void"
+        else:
+            base_type = _c_type_ref(cu_prefix, target_for_ref)
+        if annotation is not None:
+            type_annotation = f" {annotation}"
 
     dim_suffix = "".join(f"[{dim}]" for dim in dimensions)
-    return f"{base_type} {name}{dim_suffix}"
+    return f"{base_type}{type_annotation} {name}{dim_suffix}"
 
 
 def _is_anonymous_composite(die: Any) -> bool:
     return die.tag in {"DW_TAG_structure_type", "DW_TAG_union_type"} and die_name(die) == "<anonymous>"
+
+
+def _is_anonymous_typedef_inline_target(die: Any) -> bool:
+    return die.tag in {
+        "DW_TAG_structure_type",
+        "DW_TAG_union_type",
+        "DW_TAG_enumeration_type",
+    } and die_name(die) == "<anonymous>"
 
 
 def _emit_typedef_inline_composite(
@@ -319,6 +401,24 @@ def _emit_typedef_inline_composite(
     target_die: Any,
     inline_keys: set[str],
 ) -> str:
+    if target_die.tag == "DW_TAG_enumeration_type":
+        lines = ["typedef enum {"]
+        has_enumerator = False
+        for child in target_die.iter_children():
+            if child.tag != "DW_TAG_enumerator":
+                continue
+            has_enumerator = True
+            enumerator_name = die_name(child)
+            const_attr = child.attributes.get("DW_AT_const_value")
+            if const_attr is None:
+                lines.append(f"    {enumerator_name},")
+            else:
+                lines.append(f"    {enumerator_name} = {const_attr.value},")
+        if not has_enumerator:
+            lines.append("    /* no enumerators in DWARF */")
+        lines.append(f"}} {typedef_name};")
+        return "\n".join(lines)
+
     tag_kw = _c_tag_name(target_die.tag)
     packed_suffix = " __attribute__((packed))" if _is_packed_composite(cu_prefix, target_die) else ""
     lines = [f"typedef {tag_kw} {{"]
@@ -351,7 +451,7 @@ def _typedef_inline_target_keys(
             continue
 
         target = _resolve_type_attr(die)
-        if target is None or not _is_anonymous_composite(target):
+        if target is None or not _is_anonymous_typedef_inline_target(target):
             continue
 
         target_key = _die_key(cu_prefix, target)
@@ -483,7 +583,7 @@ def _emit_c_declaration_for_node(
             return None
 
         target_key = _die_key(cu_prefix, target)
-        if target_key in typedef_inline_target_keys and _is_anonymous_composite(target):
+        if target_key in typedef_inline_target_keys and _is_anonymous_typedef_inline_target(target):
             return _emit_typedef_inline_composite(cu_prefix, name, target, inline_keys)
 
         return f"typedef {_c_typed_name(cu_prefix, target, name)};"
@@ -570,7 +670,7 @@ def _build_dependency_graph(
                 continue
             seen_dep_keys.add(dep_key)
             deps.append((relation, dep_key))
-            if dependency.tag in GRAPH_TYPE_TAGS:
+            if dependency.tag in GRAPH_TYPE_TAGS or _resolve_type_attr(dependency) is not None:
                 visit(dep_prefix, dependency)
 
         edges[node_key] = deps
@@ -611,26 +711,33 @@ def _topological_order_from_root(
     return order
 
 
-def print_type_tree(cu_prefix: str, root_die: Any) -> None:
+def _type_tree_lines(cu_prefix: str, root_die: Any) -> list[str]:
     visited: set[str] = set()
+    lines: list[str] = []
 
     def recurse(current_prefix: str, die: Any, indent: int) -> None:
         key = _die_key(current_prefix, die)
         marker = " " * indent
         if key in visited:
-            print(f"{marker}{_format_die(current_prefix, die)} (already shown)")
+            lines.append(f"{marker}{_format_die(current_prefix, die)} (already shown)")
             return
 
         visited.add(key)
-        print(f"{marker}{_format_die(current_prefix, die)}")
+        lines.append(f"{marker}{_format_die(current_prefix, die)}")
 
         for relation, dep_prefix, dependency in _iter_dependencies(current_prefix, die):
             relation_marker = " " * (indent + 2)
-            print(f"{relation_marker}{relation} -> {_format_die(dep_prefix, dependency)}")
-            if dependency.tag in TRAVERSABLE_TYPE_TAGS:
+            lines.append(f"{relation_marker}{relation} -> {_format_die(dep_prefix, dependency)}")
+            if _is_traversable_type(dependency):
                 recurse(dep_prefix, dependency, indent + 4)
 
     recurse(cu_prefix, root_die, 0)
+    return lines
+
+
+def print_type_tree(cu_prefix: str, root_die: Any) -> None:
+    for line in _type_tree_lines(cu_prefix, root_die):
+        print(line)
 
 
 def find_named_type(
@@ -650,7 +757,7 @@ def find_named_type(
         for index, cu in enumerate(cu_list, start=1):
             percent = int((index * 100) / total_cus) if total_cus > 0 else 100
             if percent == 100 or percent >= last_percent + 10:
-                print(f"Searching type in DWARF: {percent}%", file=sys.stderr)
+                status_cb(f"Searching type in DWARF: {percent}%")
                 last_percent = percent
             for die in cu.iter_DIEs():
                 if die.tag not in TYPE_TAGS:
@@ -711,6 +818,8 @@ def render_reverse_dependencies(
 def render_all_definitions(
     dwarf_infos: list[tuple[str, DWARFInfo]],
     status_cb: Callable[[str], None],
+    *,
+    include_dependency_tree: bool = False,
 ) -> str:
     status_cb("Generating global C-style output for all named types")
     lines = [
@@ -745,6 +854,12 @@ def render_all_definitions(
         order = _topological_order_from_root(nodes, edges, root_key, status_cb)
         inline_keys = _inline_anonymous_keys(nodes, edges, root_key)
         typedef_inline_target_keys = _typedef_inline_target_keys(nodes, edges)
+
+        if include_dependency_tree:
+            root_name = die_name(root_die)
+            lines.append(f"Dependency tree for {root_name}:")
+            lines.extend(_type_tree_lines(cu_prefix, root_die))
+            lines.append("")
 
         for node_key in order:
             if node_key in emitted_node_keys:

@@ -24,10 +24,17 @@ from .macho import load_macho_dwarf_infos
 from .system import _get_current_platform_code, _get_running_macos_version
 
 T = TypeVar("T")
+_LOG_ENABLED = False
+
+
+def set_log_enabled(enabled: bool) -> None:
+    global _LOG_ENABLED
+    _LOG_ENABLED = enabled
 
 
 def _status(message: str) -> None:
-    print(f"[status] {message}", file=sys.stderr)
+    if _LOG_ENABLED:
+        print(f"[status] {message}", file=sys.stderr)
 
 
 def _resolve_input_path(*, kdk_file: str | None, kdk_tag: str | None) -> Path:
@@ -35,7 +42,7 @@ def _resolve_input_path(*, kdk_file: str | None, kdk_tag: str | None) -> Path:
         return Path(kdk_file)
 
     if kdk_tag is None:
-        raise ValueError("Either --kdk-file or --kdk must be provided.")
+        raise ValueError("Either --file or --kdk must be provided.")
 
     if "@" not in kdk_tag:
         raise ValueError("Invalid --kdk format. Expected <platform>@<version>.")
@@ -60,7 +67,7 @@ def _resolve_input_path(*, kdk_file: str | None, kdk_tag: str | None) -> Path:
         preview = ", ".join(str(path) for path in matches[:5])
         raise ValueError(
             "Multiple KDK files matched tag "
-            f"{kdk_tag}. Please use --kdk-file. Matches: {preview}"
+            f"{kdk_tag}. Please use --file. Matches: {preview}"
         )
     return matches[0]
 
@@ -91,11 +98,11 @@ def _resolve_effective_input_path(
     version = _get_running_macos_version()
     if platform is None or version is None:
         raise ValueError(
-            "Unable to auto-detect local platform/version. Please provide --kdk or --kdk-file."
+            "Unable to auto-detect local platform/version. Please provide --kdk or --file."
         )
 
     implicit_tag = f"{platform}@{version}"
-    _status(f"No --kdk/--kdk-file provided, using local system tag: {implicit_tag}")
+    _status(f"No --kdk/--file provided, using local system tag: {implicit_tag}")
     resolved = _resolve_input_path(kdk_file=None, kdk_tag=implicit_tag)
     return (resolved, implicit_tag)
 
@@ -136,7 +143,7 @@ def iter_declared_types(dwarf_path: Path) -> Iterable[tuple[str, str, str]]:
 def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
     source_group = parser.add_mutually_exclusive_group(required=False)
     source_group.add_argument(
-        "--kdk-file",
+        "--file",
         type=str,
         help="Direct path to the ELF or Mach-O file containing DWARF info.",
     )
@@ -145,7 +152,7 @@ def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         help=(
             "KDK tag in the form <platform>@<version>. "
-            "If neither --kdk nor --kdk-file is provided, local platform/version are auto-detected."
+            "If neither --kdk nor --file is provided, local platform/version are auto-detected."
         ),
     )
     parser.add_argument(
@@ -181,7 +188,7 @@ def run_extract_command(args: argparse.Namespace) -> int:
 
     try:
         dwarf_file, effective_kdk_tag = _resolve_effective_input_path(
-            kdk_file=args.kdk_file,
+            kdk_file=args.file,
             kdk_tag=args.kdk,
         )
     except ValueError as exc:
@@ -196,7 +203,11 @@ def run_extract_command(args: argparse.Namespace) -> int:
         if args.all:
 
             def extract_all(dwarf_infos: list[tuple[str, DWARFInfo]]) -> str:
-                return render_all_definitions(dwarf_infos, _status)
+                return render_all_definitions(
+                    dwarf_infos,
+                    _status,
+                    include_dependency_tree=args.with_dependency_tree,
+                )
 
             c_declarations = _run_with_dwarf_infos(dwarf_file, extract_all)
             if args.header:
