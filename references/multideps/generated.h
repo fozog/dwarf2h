@@ -1,5 +1,5 @@
 /* extracted from KDK unknown */
-/* kdk2h: https://github.com/fozog/kdk2h */
+/* dwarf2h: https://github.com/fozog/dwarf2h */
 
 union processor_flags {
     unsigned int flags;

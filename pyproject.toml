@@ -1,5 +1,5 @@
 [project]
-name = "kdk2h"
+name = "dwarf2h"
 version = "0.1.0"
 description = "Print DWARF types found in declarations"
 readme = "README.md"
@@ -31,16 +31,16 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/<your-user>/kdk2h"
-Repository = "https://github.com/<your-user>/kdk2h"
-Issues = "https://github.com/<your-user>/kdk2h/issues"
+Homepage = "https://github.com/<your-user>/dwarf2h"
+Repository = "https://github.com/<your-user>/dwarf2h"
+Issues = "https://github.com/<your-user>/dwarf2h/issues"
 
 [project.scripts]
-kdk2h = "kdk2h.cli:main"
+dwarf2h = "dwarf2h.cli:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["kdk2h"]
+packages = ["dwarf2h"]

@@ -2,10 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "kdk2h: KDK kernel.kasan.t6031",
+      "name": "dwarf2h: KDK kernel.kasan.t6031",
       "type": "debugpy",
       "request": "launch",
-      "module": "kdk2h",
+      "module": "dwarf2h",
       "args": [
           "extract",
           "--kdk", "t6031@26.5.1",

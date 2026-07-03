@@ -1,6 +1,6 @@
-# kdk2h
+# dwarf2h
 
-`kdk2h` is a small Python CLI that parses DWARF information and prints all declared types.
+`dwarf2h` is a small Python CLI that parses DWARF information and prints all declared types.
 
 ## What it prints
 
@@ -28,22 +28,22 @@ brew install pipx
 pipx ensurepath
 
 # from PyPI (after publication)
-pipx install kdk2h
+pipx install dwarf2h
 
 # or directly from GitHub
-pipx install git+https://github.com/<your-user>/kdk2h.git
+pipx install git+https://github.com/<your-user>/dwarf2h.git
 ```
 
 Then run from anywhere:
 
 ```bash
-kdk2h --help
+dwarf2h --help
 ```
 
 Alternative with pip user install:
 
 ```bash
-python3 -m pip install --user kdk2h
+python3 -m pip install --user dwarf2h
 ```
 
 ## Installation (development)
@@ -57,43 +57,43 @@ pip install -e .
 ## Usage
 
 ```bash
-kdk2h extract --kdk-file /path/to/dwarf_file
+dwarf2h extract --kdk-file /path/to/dwarf_file
 ```
 
 Or resolve from a KDK tag:
 
 ```bash
-kdk2h extract --kdk t6031@26.4.1
+dwarf2h extract --kdk t6031@26.4.1
 ```
 
 To print a specific type and recursively expand dependencies for composite types:
 
 ```bash
-kdk2h extract --kdk-file /path/to/dwarf_file arm_guest_context_26_t
+dwarf2h extract --kdk-file /path/to/dwarf_file arm_guest_context_26_t
 ```
 
 To also print the detailed dependency tree (disabled by default):
 
 ```bash
-kdk2h extract --kdk-file /path/to/dwarf_file arm_guest_context_26_t --with-dependency-tree
+dwarf2h extract --kdk-file /path/to/dwarf_file arm_guest_context_26_t --with-dependency-tree
 ```
 
 Write extracted C declarations to a header file:
 
 ```bash
-kdk2h extract --kdk t6031@26.5.1 arm_guest_context_t --header /tmp/arm_guest_context.h
+dwarf2h extract --kdk t6031@26.5.1 arm_guest_context_t --header /tmp/arm_guest_context.h
 ```
 
 Example with your KDK path:
 
 ```bash
-kdk2h extract --kdk-file /Library/Developer/KDKs/KDK_26.4.1_25E253.kdk/System/Library/Kernels/kernel.kasan.t6031.dSYM/Contents/Resources/DWARF/kernel.kasan.t6031
+dwarf2h extract --kdk-file /Library/Developer/KDKs/KDK_26.4.1_25E253.kdk/System/Library/Kernels/kernel.kasan.t6031.dSYM/Contents/Resources/DWARF/kernel.kasan.t6031
 ```
 
 List installed KDKs and detected platforms:
 
 ```bash
-kdk2h kdk-list
+dwarf2h kdk-list
 ```
 
 `*` marks the KDK matching the currently running macOS version/build.
@@ -101,13 +101,13 @@ kdk2h kdk-list
 Print platforms and full path as well:
 
 ```bash
-kdk2h kdk-list --full
+dwarf2h kdk-list --full
 ```
 
 List known platform codes (hand-maintained mapping):
 
 ```bash
-kdk2h platforms-list
+dwarf2h platforms-list
 ```
 
 `*` marks the currently running platform.
@@ -115,7 +115,7 @@ kdk2h platforms-list
 Export platform codes as CSV:
 
 ```bash
-kdk2h platforms-list --csv
+dwarf2h platforms-list --csv
 ```
 
 ## VS Code launch config
@@ -142,7 +142,7 @@ python -m twine upload dist/*
 After that, end users can simply run:
 
 ```bash
-pipx install kdk2h
+pipx install dwarf2h
 ```
 
 ## Create and push private GitHub repository
@@ -150,11 +150,11 @@ pipx install kdk2h
 ```bash
 git init
 git add .
-git commit -m "Initial commit: kdk2h"
+git commit -m "Initial commit: dwarf2h"
 # Option A: GitHub CLI
-gh repo create kdk2h --private --source=. --remote=origin --push
+gh repo create dwarf2h --private --source=. --remote=origin --push
 # Option B: create private repo on GitHub UI, then:
-# git remote add origin git@github.com:<your-user>/kdk2h.git
+# git remote add origin git@github.com:<your-user>/dwarf2h.git
 # git push -u origin main
 ```
 

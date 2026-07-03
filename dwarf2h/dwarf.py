@@ -904,7 +904,7 @@ def render_reverse_dependencies(
     typedef_inline_target_keys = _typedef_inline_target_keys(nodes, edges)
 
     lines = [
-        "/* kdk2h: https://github.com/fozog/kdk2h */",
+        "/* dwarf2h: https://github.com/fozog/dwarf2h */",
     ]
     emitted_count = 0
     for node_key in order:
@@ -935,7 +935,7 @@ def render_all_definitions(
 ) -> str:
     status_cb("Generating global C-style output for all named types")
     lines = [
-        "/* kdk2h: https://github.com/fozog/kdk2h */",
+        "/* dwarf2h: https://github.com/fozog/dwarf2h */",
         "",
     ]
     emitted_node_keys: set[str] = set()

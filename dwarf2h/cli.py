@@ -10,7 +10,7 @@ from .platforms import add_platforms_list_arguments, run_platforms_list_command
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="kdk2h",
+        prog="dwarf2h",
         description="Tools for extracting DWARF types and inspecting installed KDKs.",
     )
     parser.add_argument(

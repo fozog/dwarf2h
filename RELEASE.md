@@ -1,4 +1,4 @@
-# Release guide for kdk2h
+# Release guide for dwarf2h
 
 ## 1. Prepare
 
@@ -17,8 +17,8 @@ python -m twine check dist/*
 
 Expected files:
 
-- `dist/kdk2h-<version>.tar.gz`
-- `dist/kdk2h-<version>-py3-none-any.whl`
+- `dist/dwarf2h-<version>.tar.gz`
+- `dist/dwarf2h-<version>-py3-none-any.whl`
 
 ## 3. Publish to PyPI
 
@@ -29,13 +29,13 @@ python -m twine upload dist/*
 ## 4. Validate as a user
 
 ```bash
-pipx install kdk2h
-kdk2h --help
+pipx install dwarf2h
+dwarf2h --help
 ```
 
 ## 5. Publish from GitHub repo (optional)
 
 Before publishing, replace placeholders in `pyproject.toml`:
 
-- `https://github.com/<your-user>/kdk2h`
-- `https://github.com/<your-user>/kdk2h/issues`
+- `https://github.com/<your-user>/dwarf2h`
+- `https://github.com/<your-user>/dwarf2h/issues`
