@@ -10,3 +10,12 @@ venv/
 build/
 dist/
 *.egg-info/
+
+# Under references/, keep only source-like fixtures and build recipes.
+references/**
+!references/**/
+!references/**/*.c
+!references/**/*.h
+!references/**/Makefile
+!references/**/Dockerfile
+!references/**/make_linux

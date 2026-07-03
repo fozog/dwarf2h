@@ -195,6 +195,55 @@ def _c_type_ref(cu_prefix: str, die: Any) -> str:
     return "void"
 
 
+def _resolve_subroutine_target(die: Any) -> Any | None:
+    current = die
+    seen: set[int] = set()
+    while current is not None:
+        ident = id(current)
+        if ident in seen:
+            return None
+        seen.add(ident)
+
+        if current.tag == "DW_TAG_subroutine_type":
+            return current
+
+        if current.tag in {"DW_TAG_typedef", "DW_TAG_const_type", "DW_TAG_volatile_type"}:
+            current = _resolve_type_attr(current)
+            continue
+
+        return None
+    return None
+
+
+def _subroutine_signature(cu_prefix: str, subroutine_die: Any) -> tuple[str, str]:
+    return_type_die = _resolve_type_attr(subroutine_die)
+    if return_type_die is None:
+        return_type = "void"
+    else:
+        return_type = _c_type_ref(cu_prefix, return_type_die)
+
+    params: list[str] = []
+    variadic = False
+    for child in subroutine_die.iter_children():
+        if child.tag == "DW_TAG_formal_parameter":
+            param_type = _resolve_type_attr(child)
+            if param_type is None:
+                params.append("void")
+            else:
+                params.append(_c_type_ref(cu_prefix, param_type))
+        elif child.tag == "DW_TAG_unspecified_parameters":
+            variadic = True
+
+    if not params and not variadic:
+        param_list = "void"
+    else:
+        param_list = ", ".join(params)
+        if variadic:
+            param_list = f"{param_list}, ..." if param_list else "..."
+
+    return (return_type, param_list)
+
+
 def _attr_to_int(attr: Any) -> int | None:
     value = getattr(attr, "value", None)
     if isinstance(value, int):
@@ -380,6 +429,15 @@ def _c_typed_name(cu_prefix: str, type_die: Any, name: str) -> str:
             type_annotation = f" {annotation}"
 
     dim_suffix = "".join(f"[{dim}]" for dim in dimensions)
+
+    if base_type_die is not None and base_type_die.tag == "DW_TAG_pointer_type":
+        pointee = _resolve_type_attr(base_type_die)
+        subroutine_die = _resolve_subroutine_target(pointee) if pointee is not None else None
+        if subroutine_die is not None:
+            return_type, params = _subroutine_signature(cu_prefix, subroutine_die)
+            decl_name = f"{name}{dim_suffix}"
+            return f"{return_type} (*{decl_name})({params})"
+
     return f"{base_type}{type_annotation} {name}{dim_suffix}"
 
 
