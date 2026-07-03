@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -96,7 +97,7 @@ def _build_macho_dwarf_info(dwarf_path: Path, header: Any) -> DWARFInfo | None:
 
 def load_macho_dwarf_infos(
     dwarf_path: Path,
-    status_cb: callable,
+    status_cb: Callable[[str], None],
 ) -> list[tuple[str, DWARFInfo]]:
     if MachO is None or mach_o_consts is None:
         raise ValueError("Mach-O support requires the 'macholib' package.")

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import Any, Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from elftools.dwarf.dwarfinfo import DWARFInfo
 
@@ -414,7 +415,7 @@ def _iter_dependencies(cu_prefix: str, die: Any) -> Iterable[tuple[str, str, Any
 def _build_dependency_graph(
     cu_prefix: str,
     root_die: Any,
-    status_cb: callable,
+    status_cb: Callable[[str], None],
 ) -> tuple[dict[str, tuple[str, Any]], dict[str, list[tuple[str, str]]], str]:
     nodes: dict[str, tuple[str, Any]] = {}
     edges: dict[str, list[tuple[str, str]]] = {}
@@ -454,7 +455,7 @@ def _topological_order_from_root(
     nodes: dict[str, tuple[str, Any]],
     edges: dict[str, list[tuple[str, str]]],
     root_key: str,
-    status_cb: callable,
+    status_cb: Callable[[str], None],
 ) -> list[str]:
     status_cb("Computing reverse dependency order")
     visited: set[str] = set()
@@ -505,7 +506,7 @@ def print_type_tree(cu_prefix: str, root_die: Any) -> None:
 def find_named_type(
     dwarf_infos: list[tuple[str, DWARFInfo]],
     requested_type: str,
-    status_cb: callable,
+    status_cb: Callable[[str], None],
 ) -> tuple[str, Any, bool] | None:
     normalized_requested = re.sub(r"_(\d+)(?=_|$)", "", requested_type)
     normalized_match: tuple[str, Any] | None = None
@@ -542,7 +543,11 @@ def find_named_type(
     return None
 
 
-def render_reverse_dependencies(cu_prefix: str, root_die: Any, status_cb: callable) -> str:
+def render_reverse_dependencies(
+    cu_prefix: str,
+    root_die: Any,
+    status_cb: Callable[[str], None],
+) -> str:
     status_cb("Generating C-style reverse dependency output")
     nodes, edges, root_key = _build_dependency_graph(cu_prefix, root_die, status_cb)
     order = _topological_order_from_root(nodes, edges, root_key, status_cb)
