@@ -136,6 +136,134 @@ def _attr_to_int(attr: Any) -> int | None:
     return None
 
 
+def _align_up(value: int, alignment: int) -> int:
+    if alignment <= 1:
+        return value
+    return (value + alignment - 1) // alignment * alignment
+
+
+def _die_byte_size(die: Any) -> int | None:
+    size_attr = die.attributes.get("DW_AT_byte_size")
+    if size_attr is None:
+        return None
+    return _attr_to_int(size_attr)
+
+
+def _type_size_and_align(cu_prefix: str, type_die: Any) -> tuple[int | None, int | None]:
+    if type_die.tag in {"DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_typedef"}:
+        target = _resolve_type_attr(type_die)
+        if target is None:
+            return (None, None)
+        return _type_size_and_align(cu_prefix, target)
+
+    if type_die.tag == "DW_TAG_array_type":
+        elem = _resolve_type_attr(type_die)
+        if elem is None:
+            return (None, None)
+        elem_size, elem_align = _type_size_and_align(cu_prefix, elem)
+        dim_size = 1
+        has_dim = False
+        for child in type_die.iter_children():
+            if child.tag != "DW_TAG_subrange_type":
+                continue
+            part = _subrange_size(child)
+            if part == "":
+                continue
+            has_dim = True
+            dim_size *= int(part)
+        if elem_size is None:
+            return (None, elem_align)
+        if not has_dim:
+            return (None, elem_align)
+        return (elem_size * dim_size, elem_align)
+
+    if type_die.tag == "DW_TAG_pointer_type":
+        size = _die_byte_size(type_die)
+        if size is None:
+            size = 8
+        return (size, min(size, 8))
+
+    if type_die.tag == "DW_TAG_subroutine_type":
+        return (None, 8)
+
+    if type_die.tag == "DW_TAG_union_type":
+        return _composite_size_and_align(cu_prefix, type_die)
+
+    if type_die.tag == "DW_TAG_structure_type":
+        return _composite_size_and_align(cu_prefix, type_die)
+
+    size = _die_byte_size(type_die)
+    if size is not None and size > 0:
+        return (size, min(size, 8))
+    return (None, None)
+
+
+def _composite_size_and_align(cu_prefix: str, die: Any) -> tuple[int | None, int | None]:
+    size = _die_byte_size(die)
+    max_align = 1
+    seen = False
+    for child in die.iter_children():
+        if child.tag != "DW_TAG_member":
+            continue
+        if child.attributes.get("DW_AT_bit_size") is not None:
+            continue
+        member_type = _resolve_type_attr(child)
+        if member_type is None:
+            continue
+        _, member_align = _type_size_and_align(cu_prefix, member_type)
+        if member_align is None:
+            continue
+        max_align = max(max_align, member_align)
+        seen = True
+    if not seen:
+        return (size, None if size is None else 1)
+    return (size, max_align)
+
+
+def _is_packed_composite(cu_prefix: str, die: Any) -> bool:
+    if die.tag not in {"DW_TAG_structure_type", "DW_TAG_union_type"}:
+        return False
+
+    if die.tag == "DW_TAG_union_type":
+        return False
+
+    layout: list[tuple[int, int, int]] = []
+    for child in die.iter_children():
+        if child.tag != "DW_TAG_member":
+            continue
+        if child.attributes.get("DW_AT_bit_size") is not None:
+            continue
+
+        location = _attr_to_int(child.attributes.get("DW_AT_data_member_location"))
+        if location is None:
+            continue
+
+        member_type = _resolve_type_attr(child)
+        if member_type is None:
+            continue
+        member_size, member_align = _type_size_and_align(cu_prefix, member_type)
+        if member_size is None or member_align is None:
+            continue
+
+        layout.append((location, member_size, member_align))
+
+    if not layout:
+        return False
+
+    for location, _, member_align in layout:
+        if location > 0 and member_align > 1 and (location % member_align) != 0:
+            return True
+
+    struct_size = _die_byte_size(die)
+    if struct_size is None:
+        return False
+
+    max_end = max(location + member_size for location, member_size, _ in layout)
+    max_align = max(member_align for _, _, member_align in layout)
+    natural_size = _align_up(max_end, max_align)
+    return struct_size < natural_size
+
+
 def _subrange_size(subrange_die: Any) -> str:
     count_attr = subrange_die.attributes.get("DW_AT_count")
     count_value = _attr_to_int(count_attr) if count_attr is not None else None
@@ -192,9 +320,10 @@ def _emit_typedef_inline_composite(
     inline_keys: set[str],
 ) -> str:
     tag_kw = _c_tag_name(target_die.tag)
+    packed_suffix = " __attribute__((packed))" if _is_packed_composite(cu_prefix, target_die) else ""
     lines = [f"typedef {tag_kw} {{"]
     lines.extend(_emit_composite_members(cu_prefix, target_die, inline_keys, "    "))
-    lines.append(f"}} {typedef_name};")
+    lines.append(f"}}{packed_suffix} {typedef_name};")
     return "\n".join(lines)
 
 
@@ -381,9 +510,10 @@ def _emit_c_declaration_for_node(
     if die.tag in {"DW_TAG_structure_type", "DW_TAG_union_type"}:
         tag_kw = _c_tag_name(die.tag)
         tag_name = name if name != "<anonymous>" else _anon_c_type_name(cu_prefix, die)
+        packed_suffix = " __attribute__((packed))" if _is_packed_composite(cu_prefix, die) else ""
         lines = [f"{tag_kw} {tag_name} {{"]
         lines.extend(_emit_composite_members(cu_prefix, die, inline_keys, "    "))
-        lines.append("};")
+        lines.append(f"}}{packed_suffix};")
         return "\n".join(lines)
 
     return None
