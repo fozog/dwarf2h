@@ -174,6 +174,11 @@ def _c_type_ref(cu_prefix: str, die: Any) -> str:
         if target is None:
             return "volatile void"
         return f"volatile {_c_type_ref(cu_prefix, target)}"
+    if die.tag == "DW_TAG_atomic_type":
+        target = _resolve_type_attr(die)
+        if target is None:
+            return "_Atomic(void)"
+        return f"_Atomic({_c_type_ref(cu_prefix, target)})"
     if die.tag == "DW_TAG_pointer_type":
         target = _resolve_type_attr(die)
         if target is None:
@@ -442,7 +447,11 @@ def _c_typed_name(cu_prefix: str, type_die: Any, name: str) -> str:
 
 
 def _is_anonymous_composite(die: Any) -> bool:
-    return die.tag in {"DW_TAG_structure_type", "DW_TAG_union_type"} and die_name(die) == "<anonymous>"
+    return die.tag in {
+        "DW_TAG_structure_type",
+        "DW_TAG_union_type",
+        "DW_TAG_enumeration_type",
+    } and die_name(die) == "<anonymous>"
 
 
 def _is_anonymous_typedef_inline_target(die: Any) -> bool:
@@ -565,12 +574,45 @@ def _emit_member_lines(
         return [f"{indent}/* unresolved type */ int {member_name};"]
 
     bit_size = _attr_to_int(member_die.attributes.get("DW_AT_bit_size"))
+    member_type_key = _die_key(cu_prefix, member_type)
+
+    if (
+        member_type_key in inline_keys
+        and member_type.tag == "DW_TAG_enumeration_type"
+    ):
+        lines = [f"{indent}enum {{"]
+        has_enumerator = False
+        for child in member_type.iter_children():
+            if child.tag != "DW_TAG_enumerator":
+                continue
+            has_enumerator = True
+            enumerator_name = die_name(child)
+            const_attr = child.attributes.get("DW_AT_const_value")
+            if const_attr is None:
+                lines.append(f"{indent}    {enumerator_name},")
+            else:
+                lines.append(f"{indent}    {enumerator_name} = {const_attr.value},")
+        if not has_enumerator:
+            lines.append(f"{indent}    /* no enumerators in DWARF */")
+
+        if is_anonymous_member:
+            if bit_size is not None and bit_size >= 0:
+                lines.append(f"{indent}}} : {bit_size};")
+            else:
+                lines.append(f"{indent}}};")
+            return lines
+
+        if bit_size is not None and bit_size >= 0:
+            lines.append(f"{indent}}} {member_name} : {bit_size};")
+        else:
+            lines.append(f"{indent}}} {member_name};")
+        return lines
+
     if bit_size is not None and bit_size >= 0:
         if is_anonymous_member:
             return [f"{indent}{_c_type_ref(cu_prefix, member_type)} : {bit_size};"]
         return [f"{indent}{_c_typed_name(cu_prefix, member_type, member_name)} : {bit_size};"]
 
-    member_type_key = _die_key(cu_prefix, member_type)
     if member_type_key in inline_keys and member_type.tag in {"DW_TAG_structure_type", "DW_TAG_union_type"}:
         tag_kw = _c_tag_name(member_type.tag)
         lines = [f"{indent}{tag_kw} {{"]
@@ -686,7 +728,13 @@ def _emit_c_declaration_for_node(
 def _iter_dependencies(cu_prefix: str, die: Any) -> Iterable[tuple[str, str, Any]]:
     direct = _resolve_type_attr(die)
     if direct is not None:
-        yield ("type", cu_prefix, direct)
+        # A pointer to struct/union can be declared with an incomplete tag type,
+        # so this dependency should not force full struct/union definition ordering.
+        if not (
+            die.tag == "DW_TAG_pointer_type"
+            and direct.tag in {"DW_TAG_structure_type", "DW_TAG_union_type"}
+        ):
+            yield ("type", cu_prefix, direct)
 
     if die.tag not in COMPOSITE_TYPE_TAGS:
         return
