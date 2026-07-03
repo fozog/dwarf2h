@@ -576,3 +576,68 @@ def render_reverse_dependencies(
             status_cb(f"Printed {emitted_count} declaration(s)")
     status_cb(f"C-style output complete: {emitted_count} declaration(s)")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def render_all_definitions(
+    dwarf_infos: list[tuple[str, DWARFInfo]],
+    status_cb: Callable[[str], None],
+) -> str:
+    status_cb("Generating global C-style output for all named types")
+    lines = [
+        "/* kdk2h: https://github.com/fozog/kdk2h */",
+        "",
+    ]
+    emitted_node_keys: set[str] = set()
+    emitted_declarations: set[str] = set()
+    root_count = 0
+    emitted_count = 0
+
+    named_roots: list[tuple[str, Any]] = []
+    for cu_prefix, dwarf_info in dwarf_infos:
+        for cu in dwarf_info.iter_CUs():
+            for die in cu.iter_DIEs():
+                if die.tag not in TYPE_TAGS:
+                    continue
+                if "DW_AT_name" not in die.attributes:
+                    continue
+                if decode_name(die.attributes["DW_AT_name"].value) == "<anonymous>":
+                    continue
+                named_roots.append((cu_prefix, die))
+
+    status_cb(f"Found {len(named_roots)} named root type(s)")
+
+    for cu_prefix, root_die in named_roots:
+        root_count += 1
+        if root_count % 500 == 0:
+            status_cb(f"Processing root type {root_count}/{len(named_roots)}")
+
+        nodes, edges, root_key = _build_dependency_graph(cu_prefix, root_die, status_cb)
+        order = _topological_order_from_root(nodes, edges, root_key, status_cb)
+        inline_keys = _inline_anonymous_keys(nodes, edges, root_key)
+        typedef_inline_target_keys = _typedef_inline_target_keys(nodes, edges)
+
+        for node_key in order:
+            if node_key in emitted_node_keys:
+                continue
+            if node_key in inline_keys or node_key in typedef_inline_target_keys:
+                continue
+
+            declaration = _emit_c_declaration_for_node(
+                node_key,
+                nodes,
+                inline_keys,
+                typedef_inline_target_keys,
+            )
+            if declaration is None or declaration in emitted_declarations:
+                continue
+
+            lines.append(declaration)
+            lines.append("")
+            emitted_declarations.add(declaration)
+            emitted_node_keys.add(node_key)
+            emitted_count += 1
+            if emitted_count % 500 == 0:
+                status_cb(f"Emitted {emitted_count} declaration(s)")
+
+    status_cb(f"Global C-style output complete: {emitted_count} declaration(s)")
+    return "\n".join(lines).rstrip() + "\n"

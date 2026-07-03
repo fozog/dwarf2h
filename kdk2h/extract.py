@@ -17,6 +17,7 @@ from .dwarf import (
     find_named_type,
     iter_declared_types_from_dwarf_info,
     print_type_tree,
+    render_all_definitions,
     render_reverse_dependencies,
 )
 from .macho import load_macho_dwarf_infos
@@ -153,6 +154,11 @@ def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
         help="Optional type name to print with recursive dependencies.",
     )
     parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Extract C declarations for all named DWARF types.",
+    )
+    parser.add_argument(
         "--with-dependency-tree",
         action="store_true",
         help="Also print the detailed dependency tree before reverse-order C output.",
@@ -165,8 +171,12 @@ def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run_extract_command(args: argparse.Namespace) -> int:
-    if args.header and not args.type_name:
-        print("Error: --header requires type_name.")
+    if args.type_name and args.all:
+        print("Error: --all cannot be used with type_name.")
+        return 1
+
+    if args.header and not (args.type_name or args.all):
+        print("Error: --header requires type_name or --all.")
         return 1
 
     try:
@@ -183,7 +193,24 @@ def run_extract_command(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        if args.type_name:
+        if args.all:
+
+            def extract_all(dwarf_infos: list[tuple[str, DWARFInfo]]) -> str:
+                return render_all_definitions(dwarf_infos, _status)
+
+            c_declarations = _run_with_dwarf_infos(dwarf_file, extract_all)
+            if args.header:
+                header_path = Path(args.header)
+                header_path.parent.mkdir(parents=True, exist_ok=True)
+                kdk_label = effective_kdk_tag or "unknown"
+                header_prefix = f"/* extracted from KDK {kdk_label} */\n"
+                header_path.write_text(header_prefix + c_declarations, encoding="utf-8")
+                _status(f"C declarations written to: {header_path}")
+            else:
+                print("/* --------------------------- */")
+                print(c_declarations, end="")
+                print("/* --------------------------- */")
+        elif args.type_name:
 
             def print_named_type(dwarf_infos: list[tuple[str, DWARFInfo]]) -> bool:
                 found = find_named_type(dwarf_infos, args.type_name, _status)
