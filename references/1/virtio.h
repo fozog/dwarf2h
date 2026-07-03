@@ -75,7 +75,7 @@ typedef unsigned int mach_msg_descriptor_type_t;
 typedef volatile struct unpacked_virtq_desc {
     char flags;
     union {
-        void* address;
+        void* __ptrauth(0x02, 1, 0x5d4f) address;
         unsigned int flags32;
         unsigned short flags16;
         unsigned char flags8;

@@ -38,6 +38,11 @@ DW_AT_APPLE_PTRAUTH_KEY = 0x3E04
 DW_AT_APPLE_PTRAUTH_ADDR_DISCRIMINATED = 0x3E05
 DW_AT_APPLE_PTRAUTH_EXTRA_DISCRIMINATOR = 0x3E06
 
+PTRAUTH_TAG_NAMES = {
+    "DW_TAG_APPLE_ptrauth_type",
+    "DW_TAG_LLVM_ptrauth_type",
+}
+
 
 def decode_name(raw_name: object) -> str:
     if raw_name is None:
@@ -91,16 +96,28 @@ def _attr_value(die: Any, attr_name: str, attr_code: int) -> Any | None:
     return getattr(attr, "value", None)
 
 
+def _is_ptrauth_type(tag: object) -> bool:
+    if tag == DW_TAG_APPLE_PTRAUTH_TYPE:
+        return True
+    return tag in PTRAUTH_TAG_NAMES
+
+
 def _ptrauth_annotation(die: Any) -> str | None:
-    if die.tag != DW_TAG_APPLE_PTRAUTH_TYPE:
+    if not _is_ptrauth_type(die.tag):
         return None
 
     key = _attr_value(die, "DW_AT_APPLE_ptrauth_key", DW_AT_APPLE_PTRAUTH_KEY)
     addr_disc = _attr_value(
         die,
-        "DW_AT_APPLE_ptrauth_address_discriminated",
+        "DW_AT_APPLE_ptrauth_addr_discriminated",
         DW_AT_APPLE_PTRAUTH_ADDR_DISCRIMINATED,
     )
+    if addr_disc is None:
+        addr_disc = _attr_value(
+            die,
+            "DW_AT_APPLE_ptrauth_address_discriminated",
+            DW_AT_APPLE_PTRAUTH_ADDR_DISCRIMINATED,
+        )
     extra_disc = _attr_value(
         die,
         "DW_AT_APPLE_ptrauth_extra_discriminator",
@@ -212,12 +229,33 @@ def _resolve_subroutine_target(die: Any) -> Any | None:
         if current.tag == "DW_TAG_subroutine_type":
             return current
 
+        if _is_ptrauth_type(current.tag):
+            current = _resolve_type_attr(current)
+            continue
+
         if current.tag in {"DW_TAG_typedef", "DW_TAG_const_type", "DW_TAG_volatile_type"}:
             current = _resolve_type_attr(current)
             continue
 
         return None
     return None
+
+
+def _unwrap_ptrauth_type(die: Any) -> tuple[Any | None, str | None]:
+    current = die
+    annotation: str | None = None
+    seen: set[int] = set()
+    while current is not None and _is_ptrauth_type(current.tag):
+        ident = id(current)
+        if ident in seen:
+            return (None, None)
+        seen.add(ident)
+
+        current_annotation = _ptrauth_annotation(current)
+        if current_annotation is not None:
+            annotation = current_annotation
+        current = _resolve_type_attr(current)
+    return (current, annotation)
 
 
 def _subroutine_signature(cu_prefix: str, subroutine_die: Any) -> tuple[str, str]:
@@ -424,6 +462,9 @@ def _c_typed_name(cu_prefix: str, type_die: Any, name: str) -> str:
     if base_type_die is None:
         base_type = "void"
     else:
+        base_type_die, ptrauth_annotation = _unwrap_ptrauth_type(base_type_die)
+        if ptrauth_annotation is not None:
+            type_annotation = f" {ptrauth_annotation}"
         annotation = _ptrauth_annotation(base_type_die)
         target_for_ref = _resolve_type_attr(base_type_die) if annotation is not None else base_type_die
         if target_for_ref is None:
@@ -436,12 +477,19 @@ def _c_typed_name(cu_prefix: str, type_die: Any, name: str) -> str:
     dim_suffix = "".join(f"[{dim}]" for dim in dimensions)
 
     if base_type_die is not None and base_type_die.tag == "DW_TAG_pointer_type":
-        pointee = _resolve_type_attr(base_type_die)
+        pointee, ptrauth_annotation = _unwrap_ptrauth_type(_resolve_type_attr(base_type_die))
         subroutine_die = _resolve_subroutine_target(pointee) if pointee is not None else None
         if subroutine_die is not None:
             return_type, params = _subroutine_signature(cu_prefix, subroutine_die)
             decl_name = f"{name}{dim_suffix}"
-            return f"{return_type} (*{decl_name})({params})"
+            pointer_prefix = "*"
+            if ptrauth_annotation is None:
+                ptrauth_annotation = type_annotation.strip() or None
+            if ptrauth_annotation is not None:
+                pointer_prefix = f"* {ptrauth_annotation} "
+            elif type_annotation:
+                pointer_prefix = f"*{type_annotation} "
+            return f"{return_type} ({pointer_prefix}{decl_name})({params})"
 
     return f"{base_type}{type_annotation} {name}{dim_suffix}"
 
