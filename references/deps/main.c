@@ -29,7 +29,7 @@ typedef struct list {
 
 #endif
 
-struct node;
+//struct node;
 typedef struct node* pnode;
 
 struct node {
