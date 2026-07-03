@@ -39,7 +39,32 @@ def _status(message: str) -> None:
 
 def _resolve_input_path(*, kdk_file: str | None, kdk_tag: str | None) -> Path:
     if kdk_file is not None:
-        return Path(kdk_file)
+        raw_path = Path(kdk_file)
+        if raw_path.is_dir() and raw_path.name.endswith(".dSYM"):
+            dwarf_dir = raw_path / "Contents" / "Resources" / "DWARF"
+            expected_name = raw_path.name[: -len(".dSYM")]
+            expected_path = dwarf_dir / expected_name
+            if expected_path.is_file():
+                return expected_path
+
+            if dwarf_dir.is_dir():
+                dwarf_files = sorted(path for path in dwarf_dir.iterdir() if path.is_file())
+                if len(dwarf_files) == 1:
+                    return dwarf_files[0]
+                if len(dwarf_files) > 1:
+                    preview = ", ".join(path.name for path in dwarf_files[:5])
+                    raise ValueError(
+                        "Ambiguous .dSYM directory: expected "
+                        f"{expected_name!r} in {dwarf_dir}, found multiple files: {preview}. "
+                        "Please pass --file with the exact DWARF file path."
+                    )
+
+            raise ValueError(
+                "Invalid .dSYM directory for --file: expected DWARF file at "
+                f"{expected_path}"
+            )
+
+        return raw_path
 
     if kdk_tag is None:
         raise ValueError("Either --file or --kdk must be provided.")
