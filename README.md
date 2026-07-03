@@ -57,31 +57,65 @@ pip install -e .
 ## Usage
 
 ```bash
-kdk2h --kdk-file /path/to/dwarf_file
+kdk2h extract --kdk-file /path/to/dwarf_file
 ```
 
 Or resolve from a KDK tag:
 
 ```bash
-kdk2h --kdk t6031@26.4.1
+kdk2h extract --kdk t6031@26.4.1
 ```
 
 To print a specific type and recursively expand dependencies for composite types:
 
 ```bash
-kdk2h --kdk-file /path/to/dwarf_file arm_guest_context_26_t
+kdk2h extract --kdk-file /path/to/dwarf_file arm_guest_context_26_t
 ```
 
 To also print the detailed dependency tree (disabled by default):
 
 ```bash
-kdk2h --kdk-file /path/to/dwarf_file arm_guest_context_26_t --with-dependency-tree
+kdk2h extract --kdk-file /path/to/dwarf_file arm_guest_context_26_t --with-dependency-tree
+```
+
+Write extracted C declarations to a header file:
+
+```bash
+kdk2h extract --kdk t6031@26.5.1 arm_guest_context_t --header /tmp/arm_guest_context.h
 ```
 
 Example with your KDK path:
 
 ```bash
-kdk2h --kdk-file /Library/Developer/KDKs/KDK_26.4.1_25E253.kdk/System/Library/Kernels/kernel.kasan.t6031.dSYM/Contents/Resources/DWARF/kernel.kasan.t6031
+kdk2h extract --kdk-file /Library/Developer/KDKs/KDK_26.4.1_25E253.kdk/System/Library/Kernels/kernel.kasan.t6031.dSYM/Contents/Resources/DWARF/kernel.kasan.t6031
+```
+
+List installed KDKs and detected platforms:
+
+```bash
+kdk2h kdk-list
+```
+
+`*` marks the KDK matching the currently running macOS version/build.
+
+Print platforms and full path as well:
+
+```bash
+kdk2h kdk-list --full
+```
+
+List known platform codes (hand-maintained mapping):
+
+```bash
+kdk2h platforms-list
+```
+
+`*` marks the currently running platform.
+
+Export platform codes as CSV:
+
+```bash
+kdk2h platforms-list --csv
 ```
 
 ## VS Code launch config

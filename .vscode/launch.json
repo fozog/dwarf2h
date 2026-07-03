@@ -7,6 +7,7 @@
       "request": "launch",
       "module": "kdk2h",
       "args": [
+          "extract",
           "--kdk", "t6031@26.5.1",
           "arm_guest_context_t"
       ],
