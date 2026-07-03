@@ -25,10 +25,10 @@ def _decode_apple_version(version: str) -> str:
     return f"MacOS {version}"
 
 
-def _decode_apple_build(build: str) -> str:
+def _decode_apple_build(build: str) -> tuple[str, str]:
     match = APPLE_BUILD_PATTERN.match(build)
     if match is None:
-        return f"build {build}"
+        return (f"build {build}", "Darwin ?")
 
     darwin_major = match.group("darwin_major")
     train = match.group("train")
@@ -41,11 +41,11 @@ def _decode_apple_build(build: str) -> str:
         beta_build = train_build[1:]
         if suffix:
             beta_build = f"{beta_build}{suffix}"
-        return f"Darwin {darwin_major}, beta build {beta_build}"
+        return (f"beta build {beta_build}", f"Darwin {darwin_major}")
 
     if suffix:
-        return f"Darwin {darwin_major}, release {train} build {train_build}, suffix {suffix}"
-    return f"Darwin {darwin_major}, release {train} build {train_build}"
+        return (f"release {train} build {train_build} suffix {suffix}", f"Darwin {darwin_major}")
+    return (f"release {train} build {train_build}", f"Darwin {darwin_major}")
 
 
 def _extract_platform(dsym_name: str) -> str | None:
@@ -126,11 +126,22 @@ def _get_running_macos() -> tuple[str, str] | None:
 def run_kdk_list_command(args: argparse.Namespace) -> int:
     running = _get_running_macos()
     items = iter_installed_kdks(args.root)
+    rows: list[tuple[str, str, str, str, str, InstalledKDK]] = []
     for item in items:
         marker = "*" if running == (item.version, item.build) else " "
         version_info = _decode_apple_version(item.version)
-        build_info = _decode_apple_build(item.build)
-        line = f"{marker} {item.version}@{item.build}\t{version_info} ({build_info})"
+        build_info, darwin_info = _decode_apple_build(item.build)
+        rows.append((marker, f"{item.version}_{item.build}", version_info, build_info, darwin_info, item))
+
+    if not rows:
+        return 0
+
+    id_w = max(len("VERSION_BUILD"), *(len(version_build) for _, version_build, _, _, _, _ in rows))
+    macos_w = max(len("MACOS"), *(len(version_info) for _, _, version_info, _, _, _ in rows))
+    build_w = max(len("BUILD_INFO"), *(len(build_info) for _, _, _, build_info, _, _ in rows))
+
+    for marker, version_build, version_info, build_info, darwin_info, item in rows:
+        line = f"{marker} {version_build:<{id_w}}  {version_info:<{macos_w}}  {build_info:<{build_w}}  {darwin_info}"
         if args.full:
             platforms = ",".join(item.platforms) if item.platforms else "-"
             line = f"{line}\tplatforms={platforms}\tpath={item.path}"
