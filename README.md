@@ -1,22 +1,116 @@
 # dwarf2h
 
-`dwarf2h` is a small Python CLI that parses DWARF information and prints all declared types.
+`dwarf2h` parses DWARF information from Elf and macOS to generate C declarations, including dependencies, for selected or all types.
+
+It can extract directly from installed macOS Kernel Debug Kits (the following extracts almost everything for the Hypervisor Framework):
+dwarf2h extract --kdk t6031@26.4.1 arm_guest_context_t
+
+It also works on Linux kernels with debug symbols (the follwing extracts the struct page definition and its dependencies):
+dwarf2h extract --file linux/vmlinux-6.8.0-31-generic page
 
 ## What it prints
 
-The tool scans all compile units and prints DIE entries for these DWARF tags:
+```bash
+dwarf2h extract --file linux/vmlinux-6.8.0-31-generic page
+```
+gives
 
-- `DW_TAG_base_type`
-- `DW_TAG_atomic_type`
-- `DW_TAG_const_type`
-- `DW_TAG_volatile_type`
-- `DW_TAG_pointer_type`
-- `DW_TAG_array_type`
-- `DW_TAG_typedef`
-- `DW_TAG_structure_type`
-- `DW_TAG_union_type`
-- `DW_TAG_enumeration_type`
-- `DW_TAG_subroutine_type`
+```text
+struct list_head {
+    struct list_head * next;
+    struct list_head * prev;
+};
+
+typedef long long int __s64;
+
+typedef __s64 s64;
+
+typedef struct {
+    s64 counter;
+} atomic64_t;
+
+typedef atomic64_t atomic_long_t;
+
+struct callback_head {
+    struct callback_head * next;
+    void (*func)(struct callback_head *);
+};
+
+typedef struct {
+    int counter;
+} atomic_t;
+
+struct page {
+    long unsigned int flags;
+    union {
+        struct {
+            union {
+                struct list_head lru;
+                struct {
+                    void * __filler;
+                    unsigned int mlock_count;
+                };
+                struct list_head buddy_list;
+                struct list_head pcp_list;
+            };
+            struct address_space * mapping;
+            union {
+                long unsigned int index;
+                long unsigned int share;
+            };
+            long unsigned int private;
+        };
+        struct {
+            long unsigned int pp_magic;
+            struct page_pool * pp;
+            long unsigned int _pp_mapping_pad;
+            long unsigned int dma_addr;
+            atomic_long_t pp_ref_count;
+        };
+        struct {
+            long unsigned int compound_head;
+        };
+        struct {
+            struct dev_pagemap * pgmap;
+            void * zone_device_data;
+        };
+        struct callback_head callback_head;
+    };
+    union {
+        atomic_t _mapcount;
+        unsigned int page_type;
+    };
+    atomic_t _refcount;
+    long unsigned int memcg_data;
+};
+```
+It can also analyze complex recursive definitions
+```text
+typedef struct node * pnode;
+
+struct node {
+    pnode next;
+    int a;
+};
+````
+It documents elments that have been decorated by pointer authentication stuff on Arm
+
+```text
+struct unpacked_virtq_desc {
+    char flags;
+    union {
+        void * /* __ptrauth(0x02, 1, 0x5d4f) */ address;
+        unsigned int flags32;
+        unsigned short flags16;
+        unsigned char flags8;
+    };
+    unsigned int pad2 : 16;
+    mach_msg_type_name_t disposition : 8;
+    mach_msg_descriptor_type_t type : 8;
+    uint32_t pad_end;
+    unsigned long long addr;
+};
+```
 
 ## Install (end users)
 
@@ -27,11 +121,12 @@ Recommended (no virtualenv activation needed):
 brew install pipx
 pipx ensurepath
 
-# from PyPI (after publication)
-pipx install dwarf2h
+#install for the current user
+pipx install git+https://github.com/fozog/dwarf2h.git
 
-# or directly from GitHub
-pipx install git+https://github.com/<your-user>/dwarf2h.git
+#install for all users
+pipx install --global git+https://github.com/fozog/dwarf2h.git
+
 ```
 
 Then run from anywhere:
@@ -40,24 +135,36 @@ Then run from anywhere:
 dwarf2h --help
 ```
 
-Alternative with pip user install:
-
-```bash
-python3 -m pip install --user dwarf2h
-```
-
-## Installation (development)
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
 
 ## Usage
 
 ```bash
-dwarf2h extract --kdk-file /path/to/dwarf_file
+dwarf2h extract --file main.dSYM --all
+```
+/* --------------------------- */
+/* dwarf2h: https://github.com/fozog/dwarf2h */
+
+typedef unsigned int uint32_t;
+
+typedef unsigned short uint16_t;
+
+typedef unsigned long uint64_t;
+
+union lck_mtx_state {
+    struct {
+        uint32_t owner : 28;
+        uint32_t ilocked : 1;
+        uint32_t spin_mode : 1;
+        uint32_t needs_wakeup : 1;
+        uint32_t profile : 1;
+        uint16_t ilk_tail;
+        uint16_t as_tail;
+    };
+    uint32_t data;
+    uint64_t val;
+};
+/* --------------------------- */
+
 ```
 
 Or resolve from a KDK tag:
