@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import plistlib
-import subprocess
 from dataclasses import dataclass
+
+from .system import _get_current_platform_code
 
 
 @dataclass(frozen=True)
@@ -30,32 +30,6 @@ KNOWN_PLATFORMS: tuple[PlatformInfo, ...] = (
     PlatformInfo("t8142", "A18 / A18 Pro", "iPhone 16 family (2024)"),
     PlatformInfo("vmapple", "Virtual Apple SoC", "Apple Virtualization.framework guest platform"),
 )
-
-
-def _decode_platform_name(raw: bytes) -> str:
-    return raw.decode("ascii", errors="ignore").rstrip("\x00")
-
-
-def _get_current_platform_code() -> str | None:
-    try:
-        output = subprocess.check_output(
-            ["ioreg", "-a", "-rd1", "-c", "IOPlatformExpertDevice"],
-            stderr=subprocess.DEVNULL,
-        )
-        root = plistlib.loads(output)
-        if isinstance(root, list) and root:
-            first = root[0]
-            if isinstance(first, dict):
-                raw = first.get("platform-name")
-                if isinstance(raw, bytes):
-                    code = _decode_platform_name(raw)
-                    if code:
-                        return code
-    except Exception:
-        pass
-
-    return None
-
 
 def add_platforms_list_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
