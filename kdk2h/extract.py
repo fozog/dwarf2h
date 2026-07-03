@@ -178,6 +178,10 @@ def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run_extract_command(args: argparse.Namespace) -> int:
+    if not args.type_name and not args.all:
+        print("Error: extract requires type_name or --all.")
+        return 1
+
     if args.type_name and args.all:
         print("Error: --all cannot be used with type_name.")
         return 1
@@ -255,9 +259,6 @@ def run_extract_command(args: argparse.Namespace) -> int:
             if not match_found:
                 print(f"Error: type not found: {args.type_name}")
                 return 3
-        else:
-            for cu_offset, tag, name in iter_declared_types(dwarf_file):
-                print(f"{cu_offset} {tag} {name}")
     except BrokenPipeError:
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, sys.stdout.fileno())
