@@ -506,6 +506,12 @@ def _emit_member_lines(
             return [f"{indent}/* unresolved anonymous member */"]
         return [f"{indent}/* unresolved type */ int {member_name};"]
 
+    bit_size = _attr_to_int(member_die.attributes.get("DW_AT_bit_size"))
+    if bit_size is not None and bit_size >= 0:
+        if is_anonymous_member:
+            return [f"{indent}{_c_type_ref(cu_prefix, member_type)} : {bit_size};"]
+        return [f"{indent}{_c_typed_name(cu_prefix, member_type, member_name)} : {bit_size};"]
+
     member_type_key = _die_key(cu_prefix, member_type)
     if member_type_key in inline_keys and member_type.tag in {"DW_TAG_structure_type", "DW_TAG_union_type"}:
         tag_kw = _c_tag_name(member_type.tag)
