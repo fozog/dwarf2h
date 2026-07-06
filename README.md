@@ -84,7 +84,7 @@ struct page {
     long unsigned int memcg_data;
 };
 ```
-It can also analyze complex recursive definitions
+It can also analyze complex recursive definitions and make a compilable header
 ```text
 typedef struct node * pnode;
 
@@ -93,7 +93,7 @@ struct node {
     int a;
 };
 ````
-It documents elments that have been decorated by pointer authentication stuff on Arm
+It documents elments that are Apple Arm silicon specific
 
 ```text
 struct unpacked_virtq_desc {
@@ -170,19 +170,13 @@ union lck_mtx_state {
 Or resolve from a KDK tag:
 
 ```bash
-dwarf2h extract --kdk t6031@26.4.1
+dwarf2h extract --kdk t6031@26.4.1 arm_guest_context_t
 ```
 
-To print a specific type and recursively expand dependencies for composite types:
+On macOS this is done on running kernel version, current hardware:
 
 ```bash
-dwarf2h extract --kdk-file /path/to/dwarf_file arm_guest_context_26_t
-```
-
-To also print the detailed dependency tree (disabled by default):
-
-```bash
-dwarf2h extract --kdk-file /path/to/dwarf_file arm_guest_context_26_t --with-dependency-tree
+dwarf2h extract arm_guest_context_t
 ```
 
 Write extracted C declarations to a header file:
@@ -191,13 +185,8 @@ Write extracted C declarations to a header file:
 dwarf2h extract --kdk t6031@26.5.1 arm_guest_context_t --header /tmp/arm_guest_context.h
 ```
 
-Example with your KDK path:
 
-```bash
-dwarf2h extract --kdk-file /Library/Developer/KDKs/KDK_26.4.1_25E253.kdk/System/Library/Kernels/kernel.kasan.t6031.dSYM/Contents/Resources/DWARF/kernel.kasan.t6031
-```
-
-List installed KDKs and detected platforms:
+macOS specific commands: installed KDKs and detected platforms:
 
 ```bash
 dwarf2h kdk-list
@@ -228,43 +217,3 @@ dwarf2h platforms-list --csv
 ## VS Code launch config
 
 A ready-to-use debug configuration is provided in `.vscode/launch.json`.
-
-## Build and publish (maintainer)
-
-Create distributable artifacts (wheel + sdist):
-
-```bash
-python -m pip install -U pip
-python -m pip install -e .[dev]
-python -m build
-python -m twine check dist/*
-```
-
-Upload to PyPI:
-
-```bash
-python -m twine upload dist/*
-```
-
-After that, end users can simply run:
-
-```bash
-pipx install dwarf2h
-```
-
-## Create and push private GitHub repository
-
-```bash
-git init
-git add .
-git commit -m "Initial commit: dwarf2h"
-# Option A: GitHub CLI
-gh repo create dwarf2h --private --source=. --remote=origin --push
-# Option B: create private repo on GitHub UI, then:
-# git remote add origin git@github.com:<your-user>/dwarf2h.git
-# git push -u origin main
-```
-
-## Note
-
-The tool supports both ELF and Mach-O inputs containing DWARF sections.
