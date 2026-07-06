@@ -123,9 +123,11 @@ pipx ensurepath
 
 #install for the current user
 pipx install git+https://github.com/fozog/dwarf2h.git
+#if pipx cannot determine the package name on older versions:
+pipx install dwarf2h --spec git+https://github.com/fozog/dwarf2h.git
 
-#install for all users
-pipx install --global git+https://github.com/fozog/dwarf2h.git
+#install for all users (Ubuntu 24.04 minimum)
+sudo pipx install --global git+https://github.com/fozog/dwarf2h.git
 
 ```
 
@@ -177,6 +179,12 @@ On macOS this is done on running kernel version, current hardware:
 
 ```bash
 dwarf2h extract arm_guest_context_t
+```
+
+On Linux this defaults to `/usr/lib/modules/$(uname -r)/build/vmlinux` when neither `--kdk` nor `--file` is provided:
+
+```bash
+dwarf2h extract page
 ```
 
 Write extracted C declarations to a header file:
