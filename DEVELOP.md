@@ -105,6 +105,57 @@ dwarf2h --help
 python -m build
 ```
 
+## 3) Changer la version et amender le dernier commit
+
+La source de verite de la version est `pyproject.toml` (et non `*.egg-info/PKG-INFO`, qui est genere).
+
+### Etapes recommandees
+
+1. Modifiez `version = "..."` dans `pyproject.toml`.
+2. Nettoyez les artefacts de build et metadata generees.
+3. Regenerer pour verifier que la nouvelle version est bien prise en compte.
+
+Exemple (bump vers `0.1.2`):
+
+```bash
+source .venv/bin/activate
+
+# 1) changer la version dans pyproject.toml
+$EDITOR pyproject.toml
+
+# 2) nettoyer les artefacts generes
+rm -rf build dist *.egg-info
+
+# 3) regenerer et verifier
+python -m build
+sed -n '1,8p' dwarf2h.egg-info/PKG-INFO
+```
+
+Vous devez voir `Version: 0.1.2` dans `dwarf2h.egg-info/PKG-INFO`.
+
+### Amender le dernier commit
+
+Si le dernier commit n'est pas encore pousse:
+
+```bash
+git add pyproject.toml
+git commit --amend --no-edit
+```
+
+Pour modifier aussi le message du commit:
+
+```bash
+git commit --amend -m "Bump version to 0.1.2"
+```
+
+Si le commit a deja ete pousse, il faut republier l'historique:
+
+```bash
+git push --force-with-lease
+```
+
+Utilisez `--force-with-lease` (et pas `--force`) pour eviter d'ecraser un travail distant inattendu.
+
 ## Depannage
 
 - `command not found: dwarf2h`
