@@ -119,6 +119,13 @@ def _resolve_effective_input_path(
             return (resolved, kdk_tag.strip())
         return (resolved, _extract_kdk_tag_from_path(resolved))
 
+    if sys.platform.startswith("linux"):
+        linux_vmlinux = Path("/usr/lib/modules") / os.uname().release / "build" / "vmlinux"
+        _status(
+            f"No --kdk/--file provided on Linux, using default kernel DWARF file: {linux_vmlinux}"
+        )
+        return (linux_vmlinux, None)
+
     platform = _get_current_platform_code()
     version = _get_running_macos_version()
     if platform is None or version is None:
@@ -177,7 +184,8 @@ def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         help=(
             "KDK tag in the form <platform>@<version>. "
-            "If neither --kdk nor --file is provided, local platform/version are auto-detected."
+            "If neither --kdk nor --file is provided, macOS auto-detects local "
+            "platform/version while Linux uses /usr/lib/modules/$(uname -r)/build/vmlinux."
         ),
     )
     parser.add_argument(
