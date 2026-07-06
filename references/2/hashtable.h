@@ -1,6 +1,5 @@
 #include <stddef.h>
 #include <stdatomic.h>
-#include <ptrauth.h>
 
 typedef struct hentry hentry_t;
 typedef unsigned short u16;
@@ -35,7 +34,7 @@ typedef struct htable {
         } yyy;
         u8 cache_line[64];
     };
-    void* __ptrauth(0x02, 1, 0x5d4f) address;
+    void* address;
     union uu muu;
     int test1:16;
     int test2:8;

@@ -13,26 +13,28 @@ ifeq ($(UNAME_S), Darwin)
 else ifeq ($(UNAME_S), Linux)
     # Linux Configuration
     # Ensure we are targeting an AArch64 (ARM64) system before applying the flag
+    CC = clang
     ifeq ($(UNAME_M), aarch64)
-        CFLAGS += -mbranch-protection=standard
+        CFLAGS += -march=armv8.6-a -mbranch-protection=standard
     endif
 endif
 
 CFLAGS += -g -g3 -O0 -Wno-unused-variable
 
-all:	main-dbg main-split
+all:	main main.dwarf
 
-main-dbg:	*.c *.h
-	gcc $(CFLAGS)  main.c -o main-dbg
+main:	*.c *.h
+	$(CC) $(CFLAGS)  main.c -o main
 
-main-split:	*.c *.h
+main.dwarf:	*.c *.h
 ifeq ($(UNAME_S), Linux)
-	objcopy --only-keep-debug main-dbg main.dwarf
-else
-	gcc $(CFLAGS) -gsplit-dwarf main.c -o main-split
+	objcopy --only-keep-debug main main.dwarf
 endif
 
 clean:
-	rm main-dbg main-split
+	rm main main.dwarf
+ifeq ($(UNAME_S), Darwin)
+	rm -rf main.dSYM
+endif
 
 .PHONY: all clean

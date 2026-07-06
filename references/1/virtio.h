@@ -10,11 +10,8 @@
         ptrauth_auth_data(ptr, ptrauth_key_asda, ptrauth_blend_discriminator(storage_addr, salt))
 #else
     // Linux / Standard GCC Context (Requires -march=armv8.3-a)
-    #define SIGN_DESCRIPTOR_PTR(ptr, storage_addr, salt) \
-        __builtin_ptrauth_sign_unauthenticated(ptr, 2, __builtin_ptrauth_blend_discriminator(storage_addr, salt))
-        
-    #define AUTH_DESCRIPTOR_PTR(ptr, storage_addr, salt) \
-        __builtin_ptrauth_auth(ptr, 2, __builtin_ptrauth_blend_discriminator(storage_addr, salt))
+    #define SIGN_DESCRIPTOR_PTR(ptr, storage_addr, salt) ((void* volatile)(storage_addr))
+    #define AUTH_DESCRIPTOR_PTR(ptr, storage_addr, salt) ((void* volatile)(storage_addr))
 #endif
 
 #define VIRTQ_SALT 0x5d4f
@@ -75,7 +72,7 @@ typedef unsigned int mach_msg_descriptor_type_t;
 typedef volatile struct unpacked_virtq_desc {
     char flags;
     union {
-        void* __ptrauth(0x02, 1, 0x5d4f) address;
+        void* address;
         unsigned int flags32;
         unsigned short flags16;
         unsigned char flags8;
