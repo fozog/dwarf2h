@@ -899,6 +899,13 @@ def _dot_port_escape(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", value)
 
 
+def _graphviz_html_preserve_indent(line: str) -> str:
+    expanded = line.expandtabs(4)
+    leading = len(expanded) - len(expanded.lstrip(" "))
+    body = html.escape(expanded.lstrip(" "))
+    return ("&#160;" * leading) + body
+
+
 def _graphviz_declarative_target(type_die: Any) -> Any | None:
     current = type_die
     seen: set[int] = set()
@@ -979,7 +986,7 @@ def _graphviz_emit_member_rows(
 
     if _graphviz_is_inline_anonymous_composite(cu_prefix, member_type, included_set):
         tag_kw = _c_tag_name(member_type.tag)
-        rows.append((None, html.escape(f"{indent}{tag_kw} {{")))
+        rows.append((None, _graphviz_html_preserve_indent(f"{indent}{tag_kw} {{")))
 
         child_index = 0
         for child in member_type.iter_children():
@@ -998,12 +1005,12 @@ def _graphviz_emit_member_rows(
             child_index += 1
 
         suffix = f" {member_name};" if member_name != "<anonymous>" else ";"
-        rows.append((None, html.escape(f"{indent}}}{suffix}")))
+        rows.append((None, _graphviz_html_preserve_indent(f"{indent}}}{suffix}")))
         return rows, links
 
     rendered_lines = _emit_member_lines(cu_prefix, member_die, set(), "")
     row_text = "<br align=\"left\"/>".join(
-        html.escape(line.strip()) for line in rendered_lines if line.strip()
+        _graphviz_html_preserve_indent(line.rstrip()) for line in rendered_lines if line.strip()
     )
     if not row_text:
         row_text = html.escape("/* unresolved member */")
