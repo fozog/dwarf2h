@@ -877,6 +877,7 @@ def _collect_render_context(
     status_cb: Callable[[str], None],
 ) -> tuple[
     dict[str, tuple[str, Any]],
+    dict[str, list[tuple[str, str]]],
     list[str],
     set[str],
     set[str],
@@ -886,7 +887,68 @@ def _collect_render_context(
     order = _topological_order_from_root(nodes, edges, root_key, status_cb)
     inline_keys = _inline_anonymous_keys(nodes, edges, root_key)
     typedef_inline_target_keys = _typedef_inline_target_keys(nodes, edges)
-    return nodes, order, inline_keys, typedef_inline_target_keys, root_key
+    return nodes, edges, order, inline_keys, typedef_inline_target_keys, root_key
+
+
+def _dot_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _dot_label(cu_prefix: str, die: Any) -> str:
+    return f"{_tag_name(die.tag)}\\n{die_name(die)}\\n{_die_key(cu_prefix, die)}"
+
+
+def _build_dot_from_graph(
+    nodes: dict[str, tuple[str, Any]],
+    edges: dict[str, list[tuple[str, str]]],
+    included_keys: list[str],
+    *,
+    graph_name: str,
+    graph_label: str,
+    root_key: str | None = None,
+) -> str:
+    included_set = set(included_keys)
+    node_ids = {node_key: f"n{idx}" for idx, node_key in enumerate(included_keys)}
+
+    lines = [
+        f'digraph {graph_name} {{',
+        '  graph [label="' + _dot_escape(graph_label) + '", labelloc="t", rankdir="LR"];',
+        '  node [shape=box, style="rounded,filled", fillcolor="gray95", fontname="Helvetica"];',
+        '  edge [fontname="Helvetica", arrowsize=0.8];',
+        '',
+    ]
+
+    for node_key in included_keys:
+        node_id = node_ids[node_key]
+        cu_prefix, die = nodes[node_key]
+        attrs = [
+            f'label="{_dot_escape(_dot_label(cu_prefix, die))}"',
+        ]
+        if root_key is not None and node_key == root_key:
+            attrs.append('fillcolor="LightSteelBlue"')
+            attrs.append('color="SteelBlue4"')
+            attrs.append('penwidth=1.5')
+        lines.append(f"  {node_id} [{', '.join(attrs)}];")
+
+    if included_keys:
+        lines.append("")
+
+    for src_key in included_keys:
+        src_id = node_ids[src_key]
+        for relation, dst_key in edges.get(src_key, []):
+            if dst_key not in included_set:
+                continue
+            dst_id = node_ids[dst_key]
+            edge_attrs = []
+            if relation != "type":
+                edge_attrs.append(f'label="{_dot_escape(relation)}"')
+            if relation.startswith("member "):
+                edge_attrs.append('style="dashed"')
+            attr_suffix = f" [{', '.join(edge_attrs)}]" if edge_attrs else ""
+            lines.append(f"  {src_id} -> {dst_id}{attr_suffix};")
+
+    lines.append("}")
+    return "\n".join(lines) + "\n"
 
 
 def _type_tree_lines(cu_prefix: str, root_die: Any) -> list[str]:
@@ -964,7 +1026,7 @@ def render_reverse_dependencies(
     status_cb: Callable[[str], None],
 ) -> str:
     status_cb("Generating C-style reverse dependency output")
-    nodes, order, inline_keys, typedef_inline_target_keys, _ = _collect_render_context(
+    nodes, _, order, inline_keys, typedef_inline_target_keys, _ = _collect_render_context(
         cu_prefix,
         root_die,
         status_cb,
@@ -1029,7 +1091,7 @@ def render_all_definitions(
         if root_count % 500 == 0:
             status_cb(f"Processing root type {root_count}/{len(named_roots)}")
 
-        nodes, order, inline_keys, typedef_inline_target_keys, _ = _collect_render_context(
+        nodes, _, order, inline_keys, typedef_inline_target_keys, _ = _collect_render_context(
             cu_prefix,
             root_die,
             status_cb,
@@ -1066,3 +1128,105 @@ def render_all_definitions(
 
     status_cb(f"Global C-style output complete: {emitted_count} declaration(s)")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def render_reverse_dependencies_graphviz(
+    cu_prefix: str,
+    root_die: Any,
+    status_cb: Callable[[str], None],
+) -> str:
+    status_cb("Generating Graphviz dependency output")
+    nodes, edges, order, inline_keys, typedef_inline_target_keys, root_key = _collect_render_context(
+        cu_prefix,
+        root_die,
+        status_cb,
+    )
+
+    included_keys: list[str] = []
+    for node_key in order:
+        if node_key in inline_keys or node_key in typedef_inline_target_keys:
+            continue
+        declaration = _emit_c_declaration_for_node(
+            node_key,
+            nodes,
+            inline_keys,
+            typedef_inline_target_keys,
+        )
+        if declaration is None:
+            continue
+        included_keys.append(node_key)
+
+    root_name = die_name(root_die)
+    status_cb(f"Graphviz output complete: {len(included_keys)} node(s)")
+    return _build_dot_from_graph(
+        nodes,
+        edges,
+        included_keys,
+        graph_name="dwarf2h_type_dependencies",
+        graph_label=f"dwarf2h dependencies for {root_name}",
+        root_key=root_key,
+    )
+
+
+def render_all_definitions_graphviz(
+    dwarf_infos: list[tuple[str, DWARFInfo]],
+    status_cb: Callable[[str], None],
+) -> str:
+    status_cb("Generating global Graphviz output for all named types")
+    named_roots: list[tuple[str, Any]] = []
+    for cu_prefix, dwarf_info in dwarf_infos:
+        for cu in dwarf_info.iter_CUs():
+            for die in cu.iter_DIEs():
+                if die.tag not in TYPE_TAGS:
+                    continue
+                if "DW_AT_name" not in die.attributes:
+                    continue
+                if decode_name(die.attributes["DW_AT_name"].value) == "<anonymous>":
+                    continue
+                named_roots.append((cu_prefix, die))
+
+    status_cb(f"Found {len(named_roots)} named root type(s)")
+
+    nodes_acc: dict[str, tuple[str, Any]] = {}
+    edges_acc: dict[str, list[tuple[str, str]]] = {}
+    included_order: list[str] = []
+    included_set: set[str] = set()
+
+    for root_idx, (cu_prefix, root_die) in enumerate(named_roots, start=1):
+        if root_idx % 500 == 0:
+            status_cb(f"Processing root type {root_idx}/{len(named_roots)}")
+
+        nodes, edges, order, inline_keys, typedef_inline_target_keys, _ = _collect_render_context(
+            cu_prefix,
+            root_die,
+            status_cb,
+        )
+        nodes_acc.update(nodes)
+        edges_acc.update(edges)
+
+        for node_key in order:
+            if node_key in included_set:
+                continue
+            if node_key in inline_keys or node_key in typedef_inline_target_keys:
+                continue
+
+            declaration = _emit_c_declaration_for_node(
+                node_key,
+                nodes,
+                inline_keys,
+                typedef_inline_target_keys,
+            )
+            if declaration is None:
+                continue
+
+            included_set.add(node_key)
+            included_order.append(node_key)
+
+    status_cb(f"Global Graphviz output complete: {len(included_order)} node(s)")
+    return _build_dot_from_graph(
+        nodes_acc,
+        edges_acc,
+        included_order,
+        graph_name="dwarf2h_all_type_dependencies",
+        graph_label="dwarf2h dependencies for all named types",
+    )

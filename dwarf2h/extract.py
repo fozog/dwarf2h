@@ -18,7 +18,9 @@ from .dwarf import (
     iter_declared_types_from_dwarf_info,
     print_type_tree,
     render_all_definitions,
+    render_all_definitions_graphviz,
     render_reverse_dependencies,
+    render_reverse_dependencies_graphviz,
 )
 from .macho import load_macho_dwarf_infos
 from .system import _get_current_platform_code, _get_running_macos_version
@@ -208,6 +210,11 @@ def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Write extracted C declarations to the given header file.",
     )
+    parser.add_argument(
+        "--graphviz",
+        action="store_true",
+        help="Emit Graphviz DOT output instead of C declarations.",
+    )
 
 
 def run_extract_command(args: argparse.Namespace) -> int:
@@ -221,6 +228,10 @@ def run_extract_command(args: argparse.Namespace) -> int:
 
     if args.header and not (args.type_name or args.all):
         print("Error: --header requires type_name or --all.")
+        return 1
+
+    if args.header and args.graphviz:
+        print("Error: --header cannot be used with --graphviz.")
         return 1
 
     try:
@@ -240,6 +251,11 @@ def run_extract_command(args: argparse.Namespace) -> int:
         if args.all:
 
             def extract_all(dwarf_infos: list[tuple[str, DWARFInfo]]) -> str:
+                if args.graphviz:
+                    return render_all_definitions_graphviz(
+                        dwarf_infos,
+                        _status,
+                    )
                 return render_all_definitions(
                     dwarf_infos,
                     _status,
@@ -255,9 +271,12 @@ def run_extract_command(args: argparse.Namespace) -> int:
                 header_path.write_text(header_prefix + c_declarations, encoding="utf-8")
                 _status(f"C declarations written to: {header_path}")
             else:
-                print("/* --------------------------- */")
-                print(c_declarations, end="")
-                print("/* --------------------------- */")
+                if args.graphviz:
+                    print(c_declarations, end="")
+                else:
+                    print("/* --------------------------- */")
+                    print(c_declarations, end="")
+                    print("/* --------------------------- */")
         elif args.type_name:
 
             def print_named_type(dwarf_infos: list[tuple[str, DWARFInfo]]) -> bool:
@@ -274,7 +293,10 @@ def run_extract_command(args: argparse.Namespace) -> int:
                     print_type_tree(cu_prefix, die)
                     print()
 
-                c_declarations = render_reverse_dependencies(cu_prefix, die, _status)
+                if args.graphviz:
+                    c_declarations = render_reverse_dependencies_graphviz(cu_prefix, die, _status)
+                else:
+                    c_declarations = render_reverse_dependencies(cu_prefix, die, _status)
                 if args.header:
                     header_path = Path(args.header)
                     header_path.parent.mkdir(parents=True, exist_ok=True)
@@ -283,9 +305,12 @@ def run_extract_command(args: argparse.Namespace) -> int:
                     header_path.write_text(header_prefix + c_declarations, encoding="utf-8")
                     _status(f"C declarations written to: {header_path}")
                 else:
-                    print("/* --------------------------- */")
-                    print(c_declarations, end="")
-                    print("/* --------------------------- */")
+                    if args.graphviz:
+                        print(c_declarations, end="")
+                    else:
+                        print("/* --------------------------- */")
+                        print(c_declarations, end="")
+                        print("/* --------------------------- */")
                 return True
 
             match_found = _run_with_dwarf_infos(dwarf_file, print_named_type)
