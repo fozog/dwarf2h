@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -894,13 +895,71 @@ def _dot_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _dot_label(cu_prefix: str, die: Any) -> str:
-    return f"{_tag_name(die.tag)}\\n{die_name(die)}\\n{_die_key(cu_prefix, die)}"
+def _dot_port_escape(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", value)
 
 
-def _build_dot_from_graph(
+def _graphviz_declarative_target(type_die: Any) -> Any | None:
+    current = type_die
+    seen: set[int] = set()
+    while current is not None:
+        marker = id(current)
+        if marker in seen:
+            return None
+        seen.add(marker)
+
+        if current.tag in {"DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_enumeration_type"}:
+            return current
+
+        if current.tag in {
+            "DW_TAG_const_type",
+            "DW_TAG_volatile_type",
+            "DW_TAG_atomic_type",
+            "DW_TAG_typedef",
+            "DW_TAG_array_type",
+        }:
+            current = _resolve_type_attr(current)
+            continue
+
+        return None
+
+    return None
+
+
+def _graphviz_member_pointer_target(member_type: Any) -> Any | None:
+    current = member_type
+    seen: set[int] = set()
+    while current is not None:
+        marker = id(current)
+        if marker in seen:
+            return None
+        seen.add(marker)
+
+        if current.tag in {"DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_atomic_type", "DW_TAG_typedef"}:
+            current = _resolve_type_attr(current)
+            continue
+
+        if current.tag == "DW_TAG_pointer_type":
+            return _graphviz_declarative_target(_resolve_type_attr(current))
+
+        return None
+
+    return None
+
+
+def _graphviz_node_header(cu_prefix: str, die: Any, name: str) -> tuple[str, str]:
+    if die.tag == "DW_TAG_structure_type":
+        suffix = " (packed)" if _is_packed_composite(cu_prefix, die) else ""
+        return ("struct", suffix)
+    if die.tag == "DW_TAG_union_type":
+        return ("union", "")
+    if die.tag == "DW_TAG_enumeration_type":
+        return ("enum", "")
+    return ("type", "")
+
+
+def _build_header_like_dot(
     nodes: dict[str, tuple[str, Any]],
-    edges: dict[str, list[tuple[str, str]]],
     included_keys: list[str],
     *,
     graph_name: str,
@@ -908,45 +967,139 @@ def _build_dot_from_graph(
     root_key: str | None = None,
 ) -> str:
     included_set = set(included_keys)
-    node_ids = {node_key: f"n{idx}" for idx, node_key in enumerate(included_keys)}
+    node_ids = {node_key: f"ref_{idx}" for idx, node_key in enumerate(included_keys)}
+    typedef_keys = [key for key in included_keys if nodes[key][1].tag == "DW_TAG_typedef"]
 
     lines = [
-        f'digraph {graph_name} {{',
-        '  graph [label="' + _dot_escape(graph_label) + '", labelloc="t", rankdir="LR"];',
-        '  node [shape=box, style="rounded,filled", fillcolor="gray95", fontname="Helvetica"];',
-        '  edge [fontname="Helvetica", arrowsize=0.8];',
-        '',
+        f"digraph {graph_name} {{",
+        '  graph [label="' + _dot_escape(graph_label) + '", labelloc="t", rankdir="LR", fontname="Helvetica,Arial,sans-serif"];',
+        '  node [fontname="Helvetica,Arial,sans-serif", shape=plain, style=filled, fillcolor=gray95];',
+        '  edge [fontname="Helvetica,Arial,sans-serif", arrowhead=vee, style=dashed];',
+        "",
     ]
 
-    for node_key in included_keys:
-        node_id = node_ids[node_key]
-        cu_prefix, die = nodes[node_key]
-        attrs = [
-            f'label="{_dot_escape(_dot_label(cu_prefix, die))}"',
-        ]
-        if root_key is not None and node_key == root_key:
-            attrs.append('fillcolor="LightSteelBlue"')
-            attrs.append('color="SteelBlue4"')
-            attrs.append('penwidth=1.5')
-        lines.append(f"  {node_id} [{', '.join(attrs)}];")
+    edges: list[str] = []
 
-    if included_keys:
+    for node_key in included_keys:
+        cu_prefix, die = nodes[node_key]
+        if die.tag not in {"DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_enumeration_type"}:
+            continue
+
+        node_id = node_ids[node_key]
+        name = die_name(die)
+        if name == "<anonymous>":
+            name = _anon_c_type_name(cu_prefix, die)
+
+        kind, suffix = _graphviz_node_header(cu_prefix, die, name)
+        if die.tag == "DW_TAG_structure_type":
+            bgcolor = "LightSteelBlue"
+        elif die.tag == "DW_TAG_union_type":
+            bgcolor = "LightGoldenrodYellow"
+        else:
+            bgcolor = "PaleGreen"
+
+        lines.append(f"  // {kind} {name}{suffix}")
+        lines.append(f"  {node_id} [")
+        lines.append(
+            '    label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="10" bgcolor="'
+            + bgcolor
+            + '">'
+        )
+        lines.append(
+            "      <tr><td><font point-size=\"12.0\"><b>"
+            + html.escape(f"{kind} {name}{suffix}")
+            + "</b></font></td></tr>"
+        )
+
+        if die.tag == "DW_TAG_enumeration_type":
+            enum_rows: list[str] = []
+            for child in die.iter_children():
+                if child.tag != "DW_TAG_enumerator":
+                    continue
+                enum_name = die_name(child)
+                const_attr = child.attributes.get("DW_AT_const_value")
+                if const_attr is None:
+                    enum_rows.append(f"{enum_name},")
+                else:
+                    enum_rows.append(f"{enum_name} = {const_attr.value},")
+            if not enum_rows:
+                enum_rows.append("/* no enumerators in DWARF */")
+
+            lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
+            for row in enum_rows:
+                lines.append(
+                    '        <tr><td align="left"><font point-size="8.0">'
+                    + html.escape(row)
+                    + "</font></td></tr>"
+                )
+            lines.append("      </table></td></tr>")
+        else:
+            member_rows: list[tuple[str, str]] = []
+            member_idx = 0
+            for child in die.iter_children():
+                if child.tag != "DW_TAG_member":
+                    continue
+
+                row_lines = _emit_member_lines(cu_prefix, child, set(), "")
+                row_text = "<br align=\"left\"/>".join(
+                    html.escape(line.strip()) for line in row_lines if line.strip()
+                )
+                if not row_text:
+                    row_text = html.escape("/* unresolved member */")
+
+                member_name = die_name(child)
+                port_name = _dot_port_escape(f"m_{member_idx}_{member_name}")
+                member_rows.append((port_name, row_text))
+
+                member_type = _resolve_type_attr(child)
+                target_die = _graphviz_member_pointer_target(member_type) if member_type is not None else None
+                if target_die is not None:
+                    target_key = _die_key(cu_prefix, target_die)
+                    if target_key in included_set and target_key in node_ids:
+                        dst = node_ids[target_key]
+                        edges.append(f"  {node_id}:{port_name} -> {dst}:n;")
+                member_idx += 1
+
+            if not member_rows:
+                member_rows.append(("m_empty", html.escape("/* no members in DWARF */")))
+
+            lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
+            for port_name, row_text in member_rows:
+                lines.append(
+                    '        <tr><td align="left" port="'
+                    + port_name
+                    + '"><font point-size="8.0">'
+                    + row_text
+                    + "</font></td></tr>"
+                )
+            lines.append("      </table></td></tr>")
+
+        lines.append("    </table>>")
+        lines.append("  ];")
         lines.append("")
 
-    for src_key in included_keys:
-        src_id = node_ids[src_key]
-        for relation, dst_key in edges.get(src_key, []):
-            if dst_key not in included_set:
+    if typedef_keys:
+        lines.append("  // typedefs")
+        lines.append("  typedefs [")
+        lines.append('    label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="10">')
+        lines.append('      <tr><td><font point-size="12.0"><b>Typedefs</b></font></td></tr>')
+        lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
+        for node_key in typedef_keys:
+            declaration = _emit_c_declaration_for_node(node_key, nodes, set(), set())
+            if declaration is None:
                 continue
-            dst_id = node_ids[dst_key]
-            edge_attrs = []
-            if relation != "type":
-                edge_attrs.append(f'label="{_dot_escape(relation)}"')
-            if relation.startswith("member "):
-                edge_attrs.append('style="dashed"')
-            attr_suffix = f" [{', '.join(edge_attrs)}]" if edge_attrs else ""
-            lines.append(f"  {src_id} -> {dst_id}{attr_suffix};")
+            declaration = html.escape(declaration).replace("\n", "<br align=\"left\"/>")
+            lines.append(
+                '        <tr><td align="left"><font point-size="8.0">'
+                + declaration
+                + "</font></td></tr>"
+            )
+        lines.append("      </table></td></tr>")
+        lines.append("    </table>>")
+        lines.append("  ];")
+        lines.append("")
 
+    lines.extend(edges)
     lines.append("}")
     return "\n".join(lines) + "\n"
 
@@ -1135,8 +1288,8 @@ def render_reverse_dependencies_graphviz(
     root_die: Any,
     status_cb: Callable[[str], None],
 ) -> str:
-    status_cb("Generating Graphviz dependency output")
-    nodes, edges, order, inline_keys, typedef_inline_target_keys, root_key = _collect_render_context(
+    status_cb("Generating Graphviz C-header style output")
+    nodes, _, order, inline_keys, typedef_inline_target_keys, root_key = _collect_render_context(
         cu_prefix,
         root_die,
         status_cb,
@@ -1158,12 +1311,11 @@ def render_reverse_dependencies_graphviz(
 
     root_name = die_name(root_die)
     status_cb(f"Graphviz output complete: {len(included_keys)} node(s)")
-    return _build_dot_from_graph(
+    return _build_header_like_dot(
         nodes,
-        edges,
         included_keys,
         graph_name="dwarf2h_type_dependencies",
-        graph_label=f"dwarf2h dependencies for {root_name}",
+        graph_label=f"dwarf2h C model for {root_name}",
         root_key=root_key,
     )
 
@@ -1172,7 +1324,7 @@ def render_all_definitions_graphviz(
     dwarf_infos: list[tuple[str, DWARFInfo]],
     status_cb: Callable[[str], None],
 ) -> str:
-    status_cb("Generating global Graphviz output for all named types")
+    status_cb("Generating global Graphviz C-header style output")
     named_roots: list[tuple[str, Any]] = []
     for cu_prefix, dwarf_info in dwarf_infos:
         for cu in dwarf_info.iter_CUs():
@@ -1188,7 +1340,6 @@ def render_all_definitions_graphviz(
     status_cb(f"Found {len(named_roots)} named root type(s)")
 
     nodes_acc: dict[str, tuple[str, Any]] = {}
-    edges_acc: dict[str, list[tuple[str, str]]] = {}
     included_order: list[str] = []
     included_set: set[str] = set()
 
@@ -1196,13 +1347,12 @@ def render_all_definitions_graphviz(
         if root_idx % 500 == 0:
             status_cb(f"Processing root type {root_idx}/{len(named_roots)}")
 
-        nodes, edges, order, inline_keys, typedef_inline_target_keys, _ = _collect_render_context(
+        nodes, _, order, inline_keys, typedef_inline_target_keys, _ = _collect_render_context(
             cu_prefix,
             root_die,
             status_cb,
         )
         nodes_acc.update(nodes)
-        edges_acc.update(edges)
 
         for node_key in order:
             if node_key in included_set:
@@ -1223,10 +1373,9 @@ def render_all_definitions_graphviz(
             included_order.append(node_key)
 
     status_cb(f"Global Graphviz output complete: {len(included_order)} node(s)")
-    return _build_dot_from_graph(
+    return _build_header_like_dot(
         nodes_acc,
-        edges_acc,
         included_order,
         graph_name="dwarf2h_all_type_dependencies",
-        graph_label="dwarf2h dependencies for all named types",
+        graph_label="dwarf2h C data model for all named types",
     )
