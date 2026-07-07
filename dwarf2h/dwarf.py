@@ -1008,7 +1008,8 @@ def _graphviz_emit_member_rows(
         rows.append((None, _graphviz_html_preserve_indent(f"{indent}}}{suffix}")))
         return rows, links
 
-    rendered_lines = _emit_member_lines(cu_prefix, member_die, set(), "")
+    member_inline_keys = _graphviz_collect_inline_anonymous_member_type_keys(cu_prefix, member_type)
+    rendered_lines = _emit_member_lines(cu_prefix, member_die, member_inline_keys, "")
     row_text = "<br align=\"left\"/>".join(
         _graphviz_html_preserve_indent(line.rstrip()) for line in rendered_lines if line.strip()
     )
