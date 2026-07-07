@@ -20,3 +20,6 @@ references/**
 !references/**/Makefile
 !references/**/Dockerfile
 !references/**/make_linux
+*.dot
+*.h
+*.pdf
