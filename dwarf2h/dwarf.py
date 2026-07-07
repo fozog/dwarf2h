@@ -947,6 +947,79 @@ def _graphviz_member_pointer_target(member_type: Any) -> Any | None:
     return None
 
 
+def _graphviz_is_inline_anonymous_composite(
+    cu_prefix: str,
+    member_type: Any,
+    included_set: set[str],
+) -> bool:
+    if member_type is None:
+        return False
+    if member_type.tag not in {"DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_enumeration_type"}:
+        return False
+    if die_name(member_type) != "<anonymous>":
+        return False
+    return _die_key(cu_prefix, member_type) not in included_set
+
+
+def _graphviz_emit_member_rows(
+    cu_prefix: str,
+    member_die: Any,
+    included_set: set[str],
+    *,
+    row_index: int,
+    port_prefix: str = "m",
+    indent: str = "",
+) -> tuple[list[tuple[str | None, str]], list[tuple[str, str]]]:
+    rows: list[tuple[str | None, str]] = []
+    links: list[tuple[str, str]] = []
+
+    member_name = die_name(member_die)
+    member_type = _resolve_type_attr(member_die)
+    port_base = _dot_port_escape(f"{port_prefix}_{row_index}_{member_name}")
+
+    if _graphviz_is_inline_anonymous_composite(cu_prefix, member_type, included_set):
+        tag_kw = _c_tag_name(member_type.tag)
+        rows.append((None, html.escape(f"{indent}{tag_kw} {{")))
+
+        child_index = 0
+        for child in member_type.iter_children():
+            if child.tag != "DW_TAG_member":
+                continue
+            child_rows, child_links = _graphviz_emit_member_rows(
+                cu_prefix,
+                child,
+                included_set,
+                row_index=child_index,
+                port_prefix=port_base,
+                indent=indent + "    ",
+            )
+            rows.extend(child_rows)
+            links.extend(child_links)
+            child_index += 1
+
+        suffix = f" {member_name};" if member_name != "<anonymous>" else ";"
+        rows.append((None, html.escape(f"{indent}}}{suffix}")))
+        return rows, links
+
+    rendered_lines = _emit_member_lines(cu_prefix, member_die, set(), "")
+    row_text = "<br align=\"left\"/>".join(
+        html.escape(line.strip()) for line in rendered_lines if line.strip()
+    )
+    if not row_text:
+        row_text = html.escape("/* unresolved member */")
+
+    rows.append((port_base, row_text))
+
+    if member_type is not None:
+        target_die = _graphviz_member_pointer_target(member_type)
+        if target_die is not None:
+            target_key = _die_key(cu_prefix, target_die)
+            if target_key in included_set:
+                links.append((port_base, target_key))
+
+    return rows, links
+
+
 def _graphviz_node_header(cu_prefix: str, die: Any, name: str) -> tuple[str, str]:
     if die.tag == "DW_TAG_structure_type":
         suffix = " (packed)" if _is_packed_composite(cu_prefix, die) else ""
@@ -1034,28 +1107,21 @@ def _build_header_like_dot(
                 )
             lines.append("      </table></td></tr>")
         else:
-            member_rows: list[tuple[str, str]] = []
+            member_rows: list[tuple[str | None, str]] = []
             member_idx = 0
             for child in die.iter_children():
                 if child.tag != "DW_TAG_member":
                     continue
 
-                row_lines = _emit_member_lines(cu_prefix, child, set(), "")
-                row_text = "<br align=\"left\"/>".join(
-                    html.escape(line.strip()) for line in row_lines if line.strip()
+                rendered_rows, pointer_links = _graphviz_emit_member_rows(
+                    cu_prefix,
+                    child,
+                    included_set,
+                    row_index=member_idx,
                 )
-                if not row_text:
-                    row_text = html.escape("/* unresolved member */")
-
-                member_name = die_name(child)
-                port_name = _dot_port_escape(f"m_{member_idx}_{member_name}")
-                member_rows.append((port_name, row_text))
-
-                member_type = _resolve_type_attr(child)
-                target_die = _graphviz_member_pointer_target(member_type) if member_type is not None else None
-                if target_die is not None:
-                    target_key = _die_key(cu_prefix, target_die)
-                    if target_key in included_set and target_key in node_ids:
+                member_rows.extend(rendered_rows)
+                for port_name, target_key in pointer_links:
+                    if target_key in node_ids:
                         dst = node_ids[target_key]
                         edges.append(f"  {node_id}:{port_name} -> {dst}:n;")
                 member_idx += 1
@@ -1065,13 +1131,20 @@ def _build_header_like_dot(
 
             lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
             for port_name, row_text in member_rows:
-                lines.append(
-                    '        <tr><td align="left" port="'
-                    + port_name
-                    + '"><font point-size="8.0">'
-                    + row_text
-                    + "</font></td></tr>"
-                )
+                if port_name is None:
+                    lines.append(
+                        '        <tr><td align="left"><font point-size="8.0">'
+                        + row_text
+                        + "</font></td></tr>"
+                    )
+                else:
+                    lines.append(
+                        '        <tr><td align="left" port="'
+                        + port_name
+                        + '"><font point-size="8.0">'
+                        + row_text
+                        + "</font></td></tr>"
+                    )
             lines.append("      </table></td></tr>")
 
         lines.append("    </table>>")
