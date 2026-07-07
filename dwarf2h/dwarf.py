@@ -954,6 +954,33 @@ def _graphviz_member_pointer_target(member_type: Any) -> Any | None:
     return None
 
 
+def _graphviz_member_link_target(member_type: Any) -> Any | None:
+    current = member_type
+    seen: set[int] = set()
+
+    while current is not None:
+        marker = id(current)
+        if marker in seen:
+            return None
+        seen.add(marker)
+
+        if current.tag in {"DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_atomic_type", "DW_TAG_typedef"}:
+            current = _resolve_type_attr(current)
+            continue
+
+        if current.tag == "DW_TAG_array_type":
+            base_type, _ = _unwrap_array_type(current)
+            current = base_type
+            continue
+
+        if current.tag == "DW_TAG_pointer_type":
+            return _graphviz_declarative_target(_resolve_type_attr(current))
+
+        return _graphviz_declarative_target(current)
+
+    return None
+
+
 def _graphviz_is_inline_anonymous_composite(
     cu_prefix: str,
     member_type: Any,
@@ -972,6 +999,7 @@ def _graphviz_emit_member_rows(
     cu_prefix: str,
     member_die: Any,
     included_set: set[str],
+    linkable_targets: set[str],
     *,
     row_index: int,
     port_prefix: str = "m",
@@ -996,6 +1024,7 @@ def _graphviz_emit_member_rows(
                 cu_prefix,
                 child,
                 included_set,
+                linkable_targets,
                 row_index=child_index,
                 port_prefix=port_base,
                 indent=indent + "    ",
@@ -1019,10 +1048,10 @@ def _graphviz_emit_member_rows(
     rows.append((port_base, row_text))
 
     if member_type is not None:
-        target_die = _graphviz_member_pointer_target(member_type)
+        target_die = _graphviz_member_link_target(member_type)
         if target_die is not None:
             target_key = _die_key(cu_prefix, target_die)
-            if target_key in included_set:
+            if target_key in linkable_targets:
                 links.append((port_base, target_key))
 
     return rows, links
@@ -1104,6 +1133,7 @@ def _graphviz_append_type_box(
     included_set: set[str],
     node_ids: dict[str, str],
 ) -> None:
+    linkable_targets = included_set | set(node_ids.keys())
     kind, suffix = _graphviz_node_header(cu_prefix, die, display_name)
     bgcolor = _graphviz_bgcolor_for_die(die)
 
@@ -1153,6 +1183,7 @@ def _graphviz_append_type_box(
                 cu_prefix,
                 child,
                 included_set,
+                linkable_targets,
                 row_index=member_idx,
             )
             member_rows.extend(rendered_rows)
