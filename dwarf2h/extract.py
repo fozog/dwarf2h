@@ -247,7 +247,7 @@ def run_extract_command(args: argparse.Namespace) -> int:
         print(f"Error: file not found: {dwarf_file}")
         return 1
 
-    emit_c_to_stdout = not bool(args.header) and not bool(args.graphviz)
+    emit_c_to_stdout = not bool(args.header)
 
     try:
         if args.all:
