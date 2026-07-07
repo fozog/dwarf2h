@@ -1199,7 +1199,42 @@ def _build_header_like_dot(
     included_set = set(included_keys)
     node_ids = {node_key: f"ref_{idx}" for idx, node_key in enumerate(included_keys)}
     typedef_keys = [key for key in included_keys if nodes[key][1].tag == "DW_TAG_typedef"]
-    typedef_multiline_boxes: list[tuple[str, str, Any]] = []
+    typedef_multiline_boxes: list[tuple[str, str, str, Any]] = []
+    typedef_multiline_typedef_keys: set[str] = set()
+    typedef_target_node_ids: dict[str, str] = {}
+
+    for node_key in typedef_keys:
+        cu_prefix, die = nodes[node_key]
+        typedef_name = die_name(die)
+        target = _resolve_type_attr(die)
+        if (
+            typedef_name == "<anonymous>"
+            or target is None
+            or not _is_anonymous_typedef_inline_target(target)
+            or _die_key(cu_prefix, target) in included_set
+        ):
+            continue
+
+        nested_inline_keys = _graphviz_collect_inline_anonymous_member_type_keys(cu_prefix, target)
+        declaration = _emit_typedef_inline_composite(
+            cu_prefix,
+            typedef_name,
+            target,
+            nested_inline_keys,
+        )
+        if "\n" not in declaration:
+            continue
+        if target.tag not in {"DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_enumeration_type"}:
+            continue
+
+        typedef_box_id = f"typedef_box_{len(typedef_multiline_boxes)}"
+        typedef_multiline_boxes.append((typedef_box_id, typedef_name, cu_prefix, target))
+        typedef_multiline_typedef_keys.add(node_key)
+        target_key = _die_key(cu_prefix, target)
+        if target_key not in typedef_target_node_ids:
+            typedef_target_node_ids[target_key] = typedef_box_id
+
+    node_ids.update(typedef_target_node_ids)
 
     lines = [
         f"digraph {graph_name} {{",
@@ -1238,6 +1273,9 @@ def _build_header_like_dot(
         lines.append('      <tr><td><font point-size="12.0"><b>Typedefs</b></font></td></tr>')
         lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
         for node_key in typedef_keys:
+            if node_key in typedef_multiline_typedef_keys:
+                continue
+
             cu_prefix, die = nodes[node_key]
             declaration: str | None = None
 
@@ -1258,14 +1296,6 @@ def _build_header_like_dot(
                         nested_inline_keys,
                     )
 
-                    if "\n" in declaration and target.tag in {
-                        "DW_TAG_structure_type",
-                        "DW_TAG_union_type",
-                        "DW_TAG_enumeration_type",
-                    }:
-                        typedef_multiline_boxes.append((typedef_name, cu_prefix, target))
-                        continue
-
             if declaration is None:
                 declaration = _emit_c_declaration_for_node(node_key, nodes, set(), set())
             if declaration is None:
@@ -1281,8 +1311,7 @@ def _build_header_like_dot(
         lines.append("  ];")
         lines.append("")
 
-    for idx, (typedef_name, cu_prefix, target_die) in enumerate(typedef_multiline_boxes):
-        typedef_node_id = f"typedef_box_{idx}"
+    for typedef_node_id, typedef_name, cu_prefix, target_die in typedef_multiline_boxes:
         _graphviz_append_type_box(
             lines,
             edges,
