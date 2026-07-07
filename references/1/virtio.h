@@ -1,20 +1,19 @@
 #include <stdint.h>
 
+#define VIRTQ_SALT 0x5d4f
+
 #if defined(__APPLE__) && defined(__arm64__)
     #include <ptrauth.h>
     // Apple Context
-    #define SIGN_DESCRIPTOR_PTR(ptr, storage_addr, salt) \
-        ptrauth_sign_unauthenticated(ptr, ptrauth_key_asda, ptrauth_blend_discriminator(storage_addr, salt))
-        
-    #define AUTH_DESCRIPTOR_PTR(ptr, storage_addr, salt) \
-        ptrauth_auth_data(ptr, ptrauth_key_asda, ptrauth_blend_discriminator(storage_addr, salt))
+    #define SIGN_DESCRIPTOR_PTR(ptr, storage_addr, salt) (ptr)
+    #define AUTH_DESCRIPTOR_PTR(ptr, storage_addr, salt) (ptr)
 #else
     // Linux / Standard GCC Context (Requires -march=armv8.3-a)
     #define SIGN_DESCRIPTOR_PTR(ptr, storage_addr, salt) ((void* volatile)(storage_addr))
     #define AUTH_DESCRIPTOR_PTR(ptr, storage_addr, salt) ((void* volatile)(storage_addr))
+    #define __ptrauth(key, type, salt)
 #endif
 
-#define VIRTQ_SALT 0x5d4f
 
 struct a
 {
@@ -72,7 +71,7 @@ typedef unsigned int mach_msg_descriptor_type_t;
 typedef volatile struct unpacked_virtq_desc {
     char flags;
     union {
-        void* address;
+        void* __ptrauth(ptrauth_key_asda, 1, VIRTQ_SALT) address;
         unsigned int flags32;
         unsigned short flags16;
         unsigned char flags8;
