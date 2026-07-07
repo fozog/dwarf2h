@@ -871,6 +871,24 @@ def _topological_order_from_root(
     return order
 
 
+def _collect_render_context(
+    cu_prefix: str,
+    root_die: Any,
+    status_cb: Callable[[str], None],
+) -> tuple[
+    dict[str, tuple[str, Any]],
+    list[str],
+    set[str],
+    set[str],
+    str,
+]:
+    nodes, edges, root_key = _build_dependency_graph(cu_prefix, root_die, status_cb)
+    order = _topological_order_from_root(nodes, edges, root_key, status_cb)
+    inline_keys = _inline_anonymous_keys(nodes, edges, root_key)
+    typedef_inline_target_keys = _typedef_inline_target_keys(nodes, edges)
+    return nodes, order, inline_keys, typedef_inline_target_keys, root_key
+
+
 def _type_tree_lines(cu_prefix: str, root_die: Any) -> list[str]:
     visited: set[str] = set()
     lines: list[str] = []
@@ -946,10 +964,11 @@ def render_reverse_dependencies(
     status_cb: Callable[[str], None],
 ) -> str:
     status_cb("Generating C-style reverse dependency output")
-    nodes, edges, root_key = _build_dependency_graph(cu_prefix, root_die, status_cb)
-    order = _topological_order_from_root(nodes, edges, root_key, status_cb)
-    inline_keys = _inline_anonymous_keys(nodes, edges, root_key)
-    typedef_inline_target_keys = _typedef_inline_target_keys(nodes, edges)
+    nodes, order, inline_keys, typedef_inline_target_keys, _ = _collect_render_context(
+        cu_prefix,
+        root_die,
+        status_cb,
+    )
 
     lines = [
         "/* dwarf2h: https://github.com/fozog/dwarf2h */",
@@ -1010,10 +1029,11 @@ def render_all_definitions(
         if root_count % 500 == 0:
             status_cb(f"Processing root type {root_count}/{len(named_roots)}")
 
-        nodes, edges, root_key = _build_dependency_graph(cu_prefix, root_die, status_cb)
-        order = _topological_order_from_root(nodes, edges, root_key, status_cb)
-        inline_keys = _inline_anonymous_keys(nodes, edges, root_key)
-        typedef_inline_target_keys = _typedef_inline_target_keys(nodes, edges)
+        nodes, order, inline_keys, typedef_inline_target_keys, _ = _collect_render_context(
+            cu_prefix,
+            root_die,
+            status_cb,
+        )
 
         if include_dependency_tree:
             root_name = die_name(root_die)
