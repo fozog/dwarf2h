@@ -1063,6 +1063,14 @@ def _graphviz_collect_inline_anonymous_member_type_keys(cu_prefix: str, root_die
     return inline_keys
 
 
+def _graphviz_should_include_node(node_key: str, nodes: dict[str, tuple[str, Any]]) -> bool:
+    _, die = nodes[node_key]
+    if die.tag in {"DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_enumeration_type"}:
+        if die_name(die) == "<anonymous>":
+            return False
+    return True
+
+
 def _graphviz_node_header(cu_prefix: str, die: Any, name: str) -> tuple[str, str]:
     if die.tag == "DW_TAG_structure_type":
         suffix = " (packed)" if _is_packed_composite(cu_prefix, die) else ""
@@ -1434,6 +1442,8 @@ def render_reverse_dependencies_graphviz(
 
     included_keys: list[str] = []
     for node_key in order:
+        if not _graphviz_should_include_node(node_key, nodes):
+            continue
         if node_key in inline_keys or node_key in typedef_inline_target_keys:
             continue
         declaration = _emit_c_declaration_for_node(
@@ -1493,6 +1503,8 @@ def render_all_definitions_graphviz(
 
         for node_key in order:
             if node_key in included_set:
+                continue
+            if not _graphviz_should_include_node(node_key, nodes):
                 continue
             if node_key in inline_keys or node_key in typedef_inline_target_keys:
                 continue
