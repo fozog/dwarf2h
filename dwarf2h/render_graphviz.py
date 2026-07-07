@@ -146,7 +146,7 @@ def _graphviz_emit_member_rows(
     member_type = _d._resolve_type_attr(member_die)
     port_base = _dot_port_escape(f"{port_prefix}_{row_index}_{member_name}")
 
-    if _graphviz_is_inline_anonymous_composite(cu_prefix, member_type, included_set):
+    if member_type is not None and _graphviz_is_inline_anonymous_composite(cu_prefix, member_type, included_set):
         tag_kw = _d._c_tag_name(member_type.tag)
         rows.append((None, _graphviz_html_preserve_indent(f"{indent}{tag_kw} {{")))
 
