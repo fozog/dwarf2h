@@ -1083,6 +1083,111 @@ def _graphviz_node_header(cu_prefix: str, die: Any, name: str) -> tuple[str, str
     return ("type", "")
 
 
+def _graphviz_bgcolor_for_die(die: Any) -> str:
+    if die.tag == "DW_TAG_structure_type":
+        return "LightSteelBlue"
+    if die.tag == "DW_TAG_union_type":
+        return "LightGoldenrodYellow"
+    if die.tag == "DW_TAG_enumeration_type":
+        return "PaleGreen"
+    return "gray95"
+
+
+def _graphviz_append_type_box(
+    lines: list[str],
+    edges: list[str],
+    *,
+    node_id: str,
+    cu_prefix: str,
+    die: Any,
+    display_name: str,
+    included_set: set[str],
+    node_ids: dict[str, str],
+) -> None:
+    kind, suffix = _graphviz_node_header(cu_prefix, die, display_name)
+    bgcolor = _graphviz_bgcolor_for_die(die)
+
+    lines.append(f"  // {kind} {display_name}{suffix}")
+    lines.append(f"  {node_id} [")
+    lines.append(
+        '    label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="10" bgcolor="'
+        + bgcolor
+        + '">'
+    )
+    lines.append(
+        "      <tr><td><font point-size=\"12.0\"><b>"
+        + html.escape(f"{kind} {display_name}{suffix}")
+        + "</b></font></td></tr>"
+    )
+
+    if die.tag == "DW_TAG_enumeration_type":
+        enum_rows: list[str] = []
+        for child in die.iter_children():
+            if child.tag != "DW_TAG_enumerator":
+                continue
+            enum_name = die_name(child)
+            const_attr = child.attributes.get("DW_AT_const_value")
+            if const_attr is None:
+                enum_rows.append(f"{enum_name},")
+            else:
+                enum_rows.append(f"{enum_name} = {const_attr.value},")
+        if not enum_rows:
+            enum_rows.append("/* no enumerators in DWARF */")
+
+        lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
+        for row in enum_rows:
+            lines.append(
+                '        <tr><td align="left"><font point-size="8.0">'
+                + html.escape(row)
+                + "</font></td></tr>"
+            )
+        lines.append("      </table></td></tr>")
+    else:
+        member_rows: list[tuple[str | None, str]] = []
+        member_idx = 0
+        for child in die.iter_children():
+            if child.tag != "DW_TAG_member":
+                continue
+
+            rendered_rows, pointer_links = _graphviz_emit_member_rows(
+                cu_prefix,
+                child,
+                included_set,
+                row_index=member_idx,
+            )
+            member_rows.extend(rendered_rows)
+            for port_name, target_key in pointer_links:
+                if target_key in node_ids:
+                    dst = node_ids[target_key]
+                    edges.append(f"  {node_id}:{port_name} -> {dst}:n;")
+            member_idx += 1
+
+        if not member_rows:
+            member_rows.append(("m_empty", html.escape("/* no members in DWARF */")))
+
+        lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
+        for port_name, row_text in member_rows:
+            if port_name is None:
+                lines.append(
+                    '        <tr><td align="left"><font point-size="8.0">'
+                    + row_text
+                    + "</font></td></tr>"
+                )
+            else:
+                lines.append(
+                    '        <tr><td align="left" port="'
+                    + port_name
+                    + '"><font point-size="8.0">'
+                    + row_text
+                    + "</font></td></tr>"
+                )
+        lines.append("      </table></td></tr>")
+
+    lines.append("    </table>>")
+    lines.append("  ];")
+    lines.append("")
+
+
 def _build_header_like_dot(
     nodes: dict[str, tuple[str, Any]],
     included_keys: list[str],
@@ -1094,6 +1199,7 @@ def _build_header_like_dot(
     included_set = set(included_keys)
     node_ids = {node_key: f"ref_{idx}" for idx, node_key in enumerate(included_keys)}
     typedef_keys = [key for key in included_keys if nodes[key][1].tag == "DW_TAG_typedef"]
+    typedef_multiline_boxes: list[tuple[str, str, Any]] = []
 
     lines = [
         f"digraph {graph_name} {{",
@@ -1114,94 +1220,16 @@ def _build_header_like_dot(
         name = die_name(die)
         if name == "<anonymous>":
             name = _anon_c_type_name(cu_prefix, die)
-
-        kind, suffix = _graphviz_node_header(cu_prefix, die, name)
-        if die.tag == "DW_TAG_structure_type":
-            bgcolor = "LightSteelBlue"
-        elif die.tag == "DW_TAG_union_type":
-            bgcolor = "LightGoldenrodYellow"
-        else:
-            bgcolor = "PaleGreen"
-
-        lines.append(f"  // {kind} {name}{suffix}")
-        lines.append(f"  {node_id} [")
-        lines.append(
-            '    label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="10" bgcolor="'
-            + bgcolor
-            + '">'
+        _graphviz_append_type_box(
+            lines,
+            edges,
+            node_id=node_id,
+            cu_prefix=cu_prefix,
+            die=die,
+            display_name=name,
+            included_set=included_set,
+            node_ids=node_ids,
         )
-        lines.append(
-            "      <tr><td><font point-size=\"12.0\"><b>"
-            + html.escape(f"{kind} {name}{suffix}")
-            + "</b></font></td></tr>"
-        )
-
-        if die.tag == "DW_TAG_enumeration_type":
-            enum_rows: list[str] = []
-            for child in die.iter_children():
-                if child.tag != "DW_TAG_enumerator":
-                    continue
-                enum_name = die_name(child)
-                const_attr = child.attributes.get("DW_AT_const_value")
-                if const_attr is None:
-                    enum_rows.append(f"{enum_name},")
-                else:
-                    enum_rows.append(f"{enum_name} = {const_attr.value},")
-            if not enum_rows:
-                enum_rows.append("/* no enumerators in DWARF */")
-
-            lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
-            for row in enum_rows:
-                lines.append(
-                    '        <tr><td align="left"><font point-size="8.0">'
-                    + html.escape(row)
-                    + "</font></td></tr>"
-                )
-            lines.append("      </table></td></tr>")
-        else:
-            member_rows: list[tuple[str | None, str]] = []
-            member_idx = 0
-            for child in die.iter_children():
-                if child.tag != "DW_TAG_member":
-                    continue
-
-                rendered_rows, pointer_links = _graphviz_emit_member_rows(
-                    cu_prefix,
-                    child,
-                    included_set,
-                    row_index=member_idx,
-                )
-                member_rows.extend(rendered_rows)
-                for port_name, target_key in pointer_links:
-                    if target_key in node_ids:
-                        dst = node_ids[target_key]
-                        edges.append(f"  {node_id}:{port_name} -> {dst}:n;")
-                member_idx += 1
-
-            if not member_rows:
-                member_rows.append(("m_empty", html.escape("/* no members in DWARF */")))
-
-            lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
-            for port_name, row_text in member_rows:
-                if port_name is None:
-                    lines.append(
-                        '        <tr><td align="left"><font point-size="8.0">'
-                        + row_text
-                        + "</font></td></tr>"
-                    )
-                else:
-                    lines.append(
-                        '        <tr><td align="left" port="'
-                        + port_name
-                        + '"><font point-size="8.0">'
-                        + row_text
-                        + "</font></td></tr>"
-                    )
-            lines.append("      </table></td></tr>")
-
-        lines.append("    </table>>")
-        lines.append("  ];")
-        lines.append("")
 
     if typedef_keys:
         lines.append("  // typedefs")
@@ -1230,6 +1258,14 @@ def _build_header_like_dot(
                         nested_inline_keys,
                     )
 
+                    if "\n" in declaration and target.tag in {
+                        "DW_TAG_structure_type",
+                        "DW_TAG_union_type",
+                        "DW_TAG_enumeration_type",
+                    }:
+                        typedef_multiline_boxes.append((typedef_name, cu_prefix, target))
+                        continue
+
             if declaration is None:
                 declaration = _emit_c_declaration_for_node(node_key, nodes, set(), set())
             if declaration is None:
@@ -1244,6 +1280,19 @@ def _build_header_like_dot(
         lines.append("    </table>>")
         lines.append("  ];")
         lines.append("")
+
+    for idx, (typedef_name, cu_prefix, target_die) in enumerate(typedef_multiline_boxes):
+        typedef_node_id = f"typedef_box_{idx}"
+        _graphviz_append_type_box(
+            lines,
+            edges,
+            node_id=typedef_node_id,
+            cu_prefix=cu_prefix,
+            die=target_die,
+            display_name=typedef_name,
+            included_set=included_set,
+            node_ids=node_ids,
+        )
 
     lines.extend(edges)
     lines.append("}")
