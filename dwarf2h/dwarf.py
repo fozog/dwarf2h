@@ -1027,6 +1027,42 @@ def _graphviz_emit_member_rows(
     return rows, links
 
 
+def _graphviz_collect_inline_anonymous_member_type_keys(cu_prefix: str, root_die: Any) -> set[str]:
+    inline_keys: set[str] = set()
+    visited: set[int] = set()
+
+    def visit_type(type_die: Any) -> None:
+        if type_die is None:
+            return
+
+        marker = id(type_die)
+        if marker in visited:
+            return
+        visited.add(marker)
+
+        if type_die.tag in {"DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_atomic_type", "DW_TAG_typedef"}:
+            visit_type(_resolve_type_attr(type_die))
+            return
+
+        if type_die.tag == "DW_TAG_array_type":
+            base_type, _ = _unwrap_array_type(type_die)
+            visit_type(base_type)
+            return
+
+        if type_die.tag in {"DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_enumeration_type"}:
+            if die_name(type_die) == "<anonymous>":
+                inline_keys.add(_die_key(cu_prefix, type_die))
+
+            if type_die.tag in {"DW_TAG_structure_type", "DW_TAG_union_type"}:
+                for child in type_die.iter_children():
+                    if child.tag != "DW_TAG_member":
+                        continue
+                    visit_type(_resolve_type_attr(child))
+
+    visit_type(root_die)
+    return inline_keys
+
+
 def _graphviz_node_header(cu_prefix: str, die: Any, name: str) -> tuple[str, str]:
     if die.tag == "DW_TAG_structure_type":
         suffix = " (packed)" if _is_packed_composite(cu_prefix, die) else ""
@@ -1165,7 +1201,28 @@ def _build_header_like_dot(
         lines.append('      <tr><td><font point-size="12.0"><b>Typedefs</b></font></td></tr>')
         lines.append('      <tr><td><table border="0" cellborder="0" cellspacing="0" cellpadding="0">')
         for node_key in typedef_keys:
-            declaration = _emit_c_declaration_for_node(node_key, nodes, set(), set())
+            cu_prefix, die = nodes[node_key]
+            declaration: str | None = None
+
+            if die.tag == "DW_TAG_typedef":
+                typedef_name = die_name(die)
+                target = _resolve_type_attr(die)
+                if (
+                    typedef_name != "<anonymous>"
+                    and target is not None
+                    and _is_anonymous_typedef_inline_target(target)
+                    and _die_key(cu_prefix, target) not in included_set
+                ):
+                    nested_inline_keys = _graphviz_collect_inline_anonymous_member_type_keys(cu_prefix, target)
+                    declaration = _emit_typedef_inline_composite(
+                        cu_prefix,
+                        typedef_name,
+                        target,
+                        nested_inline_keys,
+                    )
+
+            if declaration is None:
+                declaration = _emit_c_declaration_for_node(node_key, nodes, set(), set())
             if declaration is None:
                 continue
             declaration = html.escape(declaration).replace("\n", "<br align=\"left\"/>")
