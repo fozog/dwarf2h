@@ -247,6 +247,8 @@ def run_extract_command(args: argparse.Namespace) -> int:
         print(f"Error: file not found: {dwarf_file}")
         return 1
 
+    emit_c_to_stdout = not bool(args.header) and not bool(args.graphviz)
+
     try:
         if args.all:
 
@@ -263,15 +265,18 @@ def run_extract_command(args: argparse.Namespace) -> int:
                     _status,
                 )
 
-            c_declarations = _run_with_dwarf_infos(dwarf_file, extract_all)
-            if args.header:
+            c_declarations: str | None = None
+            if args.header or emit_c_to_stdout:
+                c_declarations = _run_with_dwarf_infos(dwarf_file, extract_all)
+
+            if args.header and c_declarations is not None:
                 header_path = Path(args.header)
                 header_path.parent.mkdir(parents=True, exist_ok=True)
                 kdk_label = effective_kdk_tag or "unknown"
                 header_prefix = f"/* extracted from KDK {kdk_label} */\n"
                 header_path.write_text(header_prefix + c_declarations, encoding="utf-8")
                 _status(f"C declarations written to: {header_path}")
-            else:
+            elif emit_c_to_stdout and c_declarations is not None:
                 print("/* --------------------------- */")
                 print(c_declarations, end="")
                 print("/* --------------------------- */")
@@ -298,15 +303,18 @@ def run_extract_command(args: argparse.Namespace) -> int:
                     print_type_tree(cu_prefix, die)
                     print()
 
-                c_declarations = render_reverse_dependencies(cu_prefix, die, _status)
-                if args.header:
+                c_declarations: str | None = None
+                if args.header or emit_c_to_stdout:
+                    c_declarations = render_reverse_dependencies(cu_prefix, die, _status)
+
+                if args.header and c_declarations is not None:
                     header_path = Path(args.header)
                     header_path.parent.mkdir(parents=True, exist_ok=True)
                     kdk_label = effective_kdk_tag or "unknown"
                     header_prefix = f"/* extracted from KDK {kdk_label} */\n"
                     header_path.write_text(header_prefix + c_declarations, encoding="utf-8")
                     _status(f"C declarations written to: {header_path}")
-                else:
+                elif emit_c_to_stdout and c_declarations is not None:
                     print("/* --------------------------- */")
                     print(c_declarations, end="")
                     print("/* --------------------------- */")
