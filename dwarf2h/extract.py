@@ -212,8 +212,8 @@ def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--graphviz",
-        action="store_true",
-        help="Emit Graphviz DOT output instead of C declarations.",
+        type=str,
+        help="Write Graphviz DOT output to the given file.",
     )
 
 
@@ -230,8 +230,8 @@ def run_extract_command(args: argparse.Namespace) -> int:
         print("Error: --header requires type_name or --all.")
         return 1
 
-    if args.header and args.graphviz:
-        print("Error: --header cannot be used with --graphviz.")
+    if args.graphviz and not (args.type_name or args.all):
+        print("Error: --graphviz requires type_name or --all.")
         return 1
 
     try:
@@ -251,15 +251,16 @@ def run_extract_command(args: argparse.Namespace) -> int:
         if args.all:
 
             def extract_all(dwarf_infos: list[tuple[str, DWARFInfo]]) -> str:
-                if args.graphviz:
-                    return render_all_definitions_graphviz(
-                        dwarf_infos,
-                        _status,
-                    )
                 return render_all_definitions(
                     dwarf_infos,
                     _status,
                     include_dependency_tree=args.with_dependency_tree,
+                )
+
+            def extract_all_graphviz(dwarf_infos: list[tuple[str, DWARFInfo]]) -> str:
+                return render_all_definitions_graphviz(
+                    dwarf_infos,
+                    _status,
                 )
 
             c_declarations = _run_with_dwarf_infos(dwarf_file, extract_all)
@@ -271,12 +272,16 @@ def run_extract_command(args: argparse.Namespace) -> int:
                 header_path.write_text(header_prefix + c_declarations, encoding="utf-8")
                 _status(f"C declarations written to: {header_path}")
             else:
-                if args.graphviz:
-                    print(c_declarations, end="")
-                else:
-                    print("/* --------------------------- */")
-                    print(c_declarations, end="")
-                    print("/* --------------------------- */")
+                print("/* --------------------------- */")
+                print(c_declarations, end="")
+                print("/* --------------------------- */")
+
+            if args.graphviz:
+                dot_output = _run_with_dwarf_infos(dwarf_file, extract_all_graphviz)
+                dot_path = Path(args.graphviz)
+                dot_path.parent.mkdir(parents=True, exist_ok=True)
+                dot_path.write_text(dot_output, encoding="utf-8")
+                _status(f"Graphviz output written to: {dot_path}")
         elif args.type_name:
 
             def print_named_type(dwarf_infos: list[tuple[str, DWARFInfo]]) -> bool:
@@ -293,10 +298,7 @@ def run_extract_command(args: argparse.Namespace) -> int:
                     print_type_tree(cu_prefix, die)
                     print()
 
-                if args.graphviz:
-                    c_declarations = render_reverse_dependencies_graphviz(cu_prefix, die, _status)
-                else:
-                    c_declarations = render_reverse_dependencies(cu_prefix, die, _status)
+                c_declarations = render_reverse_dependencies(cu_prefix, die, _status)
                 if args.header:
                     header_path = Path(args.header)
                     header_path.parent.mkdir(parents=True, exist_ok=True)
@@ -305,12 +307,16 @@ def run_extract_command(args: argparse.Namespace) -> int:
                     header_path.write_text(header_prefix + c_declarations, encoding="utf-8")
                     _status(f"C declarations written to: {header_path}")
                 else:
-                    if args.graphviz:
-                        print(c_declarations, end="")
-                    else:
-                        print("/* --------------------------- */")
-                        print(c_declarations, end="")
-                        print("/* --------------------------- */")
+                    print("/* --------------------------- */")
+                    print(c_declarations, end="")
+                    print("/* --------------------------- */")
+
+                if args.graphviz:
+                    dot_output = render_reverse_dependencies_graphviz(cu_prefix, die, _status)
+                    dot_path = Path(args.graphviz)
+                    dot_path.parent.mkdir(parents=True, exist_ok=True)
+                    dot_path.write_text(dot_output, encoding="utf-8")
+                    _status(f"Graphviz output written to: {dot_path}")
                 return True
 
             match_found = _run_with_dwarf_infos(dwarf_file, print_named_type)
